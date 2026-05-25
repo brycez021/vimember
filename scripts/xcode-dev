@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
+
+PROJECT="${PROJECT:-vimember.xcodeproj}"
+SCHEME="${SCHEME:-vimember}"
+CONFIGURATION="${CONFIGURATION:-Debug}"
+BUNDLE_ID="${BUNDLE_ID:-com.brycez021.vimember}"
+DESTINATION="${DESTINATION:-generic/platform=iOS Simulator}"
+
+case "${1:-build}" in
+  generate)
+    xcodegen generate
+    ;;
+  build)
+    xcodebuild \
+      -project "$PROJECT" \
+      -scheme "$SCHEME" \
+      -configuration "$CONFIGURATION" \
+      -destination "$DESTINATION" \
+      build
+    ;;
+  devices)
+    xcrun simctl list devices available
+    ;;
+  boot)
+    DEVICE="${2:-iPhone 17 Pro}"
+    xcrun simctl boot "$DEVICE" 2>/dev/null || true
+    xcrun simctl bootstatus "$DEVICE" -b
+    ;;
+  install)
+    DEVICE="${2:-booted}"
+    APP_PATH="${APP_PATH:-$(find "$HOME/Library/Developer/Xcode/DerivedData" -path "*/Build/Products/${CONFIGURATION}-iphonesimulator/${SCHEME}.app" -not -path "*/Index.noindex/*" -type d -print -quit)}"
+    xcrun simctl install "$DEVICE" "$APP_PATH"
+    ;;
+  launch)
+    DEVICE="${2:-booted}"
+    xcrun simctl launch "$DEVICE" "$BUNDLE_ID"
+    ;;
+  screenshot)
+    DEVICE="${2:-booted}"
+    OUTPUT="${3:-.codex/simulator-home.png}"
+    mkdir -p "$(dirname "$OUTPUT")"
+    xcrun simctl io "$DEVICE" screenshot "$OUTPUT"
+    echo "$OUTPUT"
+    ;;
+  *)
+    echo "Usage: scripts/xcode-dev [generate|build|devices|boot|install|launch|screenshot]" >&2
+    exit 64
+    ;;
+esac

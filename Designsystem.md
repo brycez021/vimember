@@ -12,7 +12,7 @@ https://www.figma.com/design/z9ewZ9itwDRhTMK94G08u1/vimember?node-id=0-1&t=xXw4C
 
 ## 2. 当前状态
 
-已由用户指定但尚未完成工具读取：
+已由用户指定并部分读取确认：
 
 1. `首页` Frame 是首页正式 UI 来源。
 2. `首页-切换` Frame 是首页切换设置卡片正式 UI 来源。
@@ -20,6 +20,25 @@ https://www.figma.com/design/z9ewZ9itwDRhTMK94G08u1/vimember?node-id=0-1&t=xXw4C
 4. 首页视觉要适配不同尺寸 iPhone。
 5. 首页视频展示参考用户准备的“文稿/视频”demo 效果，demo 路径为 `/Users/zhangsiyuan/Documents/视频`。
 6. demo 只参考效果，不参考实现方式；即使 demo 与 Figma 有差异，也以 Figma 画出来的感觉为准。
+
+### 2.1 首页屏幕换算规则
+
+首页 `首页` Frame 中的 `iPhone Air` 图层是屏幕范围参考，尺寸为 `420pt * 912pt`。实现首页悬浮控件和屏幕边距时，所有值均按 iOS point 计算，并使用真实设备屏幕尺寸进行缩放。
+
+换算规则：
+
+1. 真实屏幕尺寸优先取 `UIScreen.main.bounds.size`。
+2. 横向尺寸、横向位置、左右边距按 `screenWidth / 420` 缩放。
+3. 纵向位置、上下边距按 `screenHeight / 912` 缩放。
+4. 不得使用滚动内容高度或普通容器高度替代真实屏幕高度来计算悬浮控件距屏幕边缘的位置。
+
+当前首页悬浮控件基准值：
+
+| 组件 | Figma 基准尺寸 | Figma 基准位置/边距 | 响应规则 |
+| --- | --- | --- | --- |
+| 右上切换按钮 | `44pt * 44pt` | 距右 `20pt`，距上 `69pt` | 以 `420pt * 912pt` 为参考，按真实屏幕 pt 缩放 |
+| 底部搜索框 | `306pt * 50pt` | 底部整体距左 `27pt`，距底 `27pt` | 宽度按横向缩放，高度和底边距按已确认规则缩放 |
+| 右下添加按钮 | `50pt * 50pt` | 距搜索框 `10pt`，底部整体距右 `27pt`，距底 `27pt` | 以底部整体为一组按真实屏幕 pt 定位 |
 
 尚未提取具体数值：
 
@@ -33,7 +52,7 @@ https://www.figma.com/design/z9ewZ9itwDRhTMK94G08u1/vimember?node-id=0-1&t=xXw4C
 8. 画廊视图组件规格。
 9. 详情视图组件规格。
 10. 导入和编辑流程组件规格。
-11. `首页` Frame 中视频、纯色底、文字区和悬浮按钮的精确尺寸。
+11. `首页` Frame 中视频、纯色底和文字区的精确尺寸。
 12. `首页-切换` Frame 中卡片、选项、状态和动效规格。
 
 以上内容不得自行猜测。
