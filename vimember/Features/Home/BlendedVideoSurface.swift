@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 struct BlendedVideoSurface<Content: View>: View {
     let url: URL?
@@ -12,7 +11,6 @@ struct BlendedVideoSurface<Content: View>: View {
     let content: (_ videoHeight: CGFloat, _ isLandscape: Bool, _ videoYOffset: CGFloat) -> Content
 
     @State private var bottomColor: Color
-    @State private var posterImage: UIImage?
 
     init(
         url: URL?,
@@ -72,10 +70,6 @@ struct BlendedVideoSurface<Content: View>: View {
         videoHeight - blendTopOffset + colorBlockOverflow
     }
 
-    private var blurredPosterRenderHeight: CGFloat {
-        isLandscape ? naturalHeight : videoHeight
-    }
-
     private var clearVideoFadeStart: CGFloat {
         isLandscape ? 0.62 : 1
     }
@@ -84,63 +78,15 @@ struct BlendedVideoSurface<Content: View>: View {
         ZStack(alignment: .top) {
             bottomColor
 
-            if let posterImage {
-                Image(uiImage: posterImage)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: width, height: videoHeight)
-                    .mask(clearVideoMask)
-                    .clipped()
-                    .offset(y: videoYOffset)
-            }
-
             VideoPlayerSurface(url: url, isPlaying: isPlaying, videoGravity: .resizeAspectFill)
                 .frame(width: width, height: videoHeight)
                 .mask(clearVideoMask)
                 .clipped()
                 .offset(y: videoYOffset)
 
-            if let posterImage {
-                blurredPosterLayer(
-                    posterImage,
-                    radius: isLandscape ? 8 : 7,
-                    opacity: 0.24,
-                    visibleFrom: isLandscape ? 0.10 : 0,
-                    fullFrom: isLandscape ? 0.36 : 0.18
-                )
-
-                blurredPosterLayer(
-                    posterImage,
-                    radius: isLandscape ? 18 : 14,
-                    opacity: isLandscape ? 0.48 : 0.46,
-                    visibleFrom: isLandscape ? 0.30 : 0.08,
-                    fullFrom: isLandscape ? 0.58 : 0.34
-                )
-
-                blurredPosterLayer(
-                    posterImage,
-                    radius: isLandscape ? 36 : 27,
-                    opacity: isLandscape ? 0.68 : 0.62,
-                    visibleFrom: isLandscape ? 0.50 : 0.26,
-                    fullFrom: isLandscape ? 0.80 : 0.62
-                )
-
-                blurredPosterLayer(
-                    posterImage,
-                    radius: isLandscape ? 60 : 42,
-                    opacity: isLandscape ? 0.88 : 0.80,
-                    visibleFrom: isLandscape ? 0.68 : 0.55,
-                    fullFrom: isLandscape ? 1 : 0.92
-                )
-            }
-
-            LinearGradient(
-                colors: [.clear, bottomColor.opacity(0.18), bottomColor.opacity(0.94)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: blendMaskHeight)
-            .offset(y: videoYOffset + blendTopOffset)
+            pureColorBlendLayer
+                .frame(height: blendMaskHeight)
+                .offset(y: videoYOffset + blendTopOffset)
 
             content(videoHeight, isLandscape, videoYOffset)
         }
@@ -150,39 +96,33 @@ struct BlendedVideoSurface<Content: View>: View {
             guard let url else { return }
             let sample = await VideoColorSampler.shared.sample(for: url, fallback: fallbackTint)
             bottomColor = sample.bottomColor
-            posterImage = sample.image
         }
     }
 
-    private func blurredPosterLayer(
-        _ posterImage: UIImage,
-        radius: CGFloat,
-        opacity: Double,
-        visibleFrom: CGFloat,
-        fullFrom: CGFloat
-    ) -> some View {
-        Image(uiImage: posterImage)
-            .resizable()
-            .scaledToFill()
-            .frame(width: width, height: videoHeight)
-            .blur(radius: radius)
-            .opacity(opacity)
-            .frame(width: width, height: blurredPosterRenderHeight, alignment: .top)
-            .mask(alignment: .top) {
-                LinearGradient(
-                    stops: [
-                        .init(color: .clear, location: visibleFrom),
-                        .init(color: .black, location: fullFrom),
-                        .init(color: .black, location: 1)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(width: width, height: blendMaskHeight)
-                .offset(y: blendTopOffset)
-            }
-            .clipped()
-            .offset(y: videoYOffset)
+    private var pureColorBlendLayer: some View {
+        ZStack {
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: bottomColor.opacity(isLandscape ? 0.10 : 0.08), location: isLandscape ? 0.30 : 0.20),
+                    .init(color: bottomColor.opacity(isLandscape ? 0.42 : 0.34), location: isLandscape ? 0.66 : 0.62),
+                    .init(color: bottomColor.opacity(0.96), location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .white.opacity(isLandscape ? 0.05 : 0.04), location: 0.42),
+                    .init(color: .clear, location: 0.72)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .blendMode(.plusLighter)
+        }
     }
 
     @ViewBuilder
