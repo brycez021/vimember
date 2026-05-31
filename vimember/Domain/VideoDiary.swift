@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import SwiftUI
 
 struct VideoDiary: Identifiable, Equatable {
@@ -6,7 +7,8 @@ struct VideoDiary: Identifiable, Equatable {
     let title: String
     let dateText: String
     let body: String
-    let videoResource: String
+    let videoResource: String?
+    let localVideoFilename: String?
     let displayAspectRatio: CGFloat
     let fallbackTint: Color
 
@@ -19,22 +21,134 @@ struct VideoDiary: Identifiable, Equatable {
         displayAspectRatio: CGFloat,
         fallbackTint: Color
     ) {
+        self.init(
+            id: id,
+            title: title,
+            dateText: dateText,
+            body: body,
+            videoResource: videoResource,
+            localVideoFilename: nil,
+            displayAspectRatio: displayAspectRatio,
+            fallbackTint: fallbackTint
+        )
+    }
+
+    init(
+        id: UUID = UUID(),
+        title: String,
+        dateText: String,
+        body: String,
+        localVideoFilename: String,
+        displayAspectRatio: CGFloat,
+        fallbackTint: Color
+    ) {
+        self.init(
+            id: id,
+            title: title,
+            dateText: dateText,
+            body: body,
+            videoResource: nil,
+            localVideoFilename: localVideoFilename,
+            displayAspectRatio: displayAspectRatio,
+            fallbackTint: fallbackTint
+        )
+    }
+
+    private init(
+        id: UUID,
+        title: String,
+        dateText: String,
+        body: String,
+        videoResource: String?,
+        localVideoFilename: String?,
+        displayAspectRatio: CGFloat,
+        fallbackTint: Color
+    ) {
         self.id = id
         self.title = title
         self.dateText = dateText
         self.body = body
         self.videoResource = videoResource
+        self.localVideoFilename = localVideoFilename
         self.displayAspectRatio = displayAspectRatio
         self.fallbackTint = fallbackTint
     }
 
     var videoURL: URL? {
-        Bundle.main.url(forResource: videoResource, withExtension: "mp4")
+        if let localVideoFilename {
+            return VideoFileStore.url(for: localVideoFilename)
+        }
+
+        guard let videoResource else {
+            return nil
+        }
+
+        return Bundle.main.url(forResource: videoResource, withExtension: "mp4")
     }
 
     var isLandscapeVideo: Bool {
         displayAspectRatio > 1
     }
+}
+
+@Model
+final class VideoDiaryRecord {
+    @Attribute(.unique) var id: UUID
+    var title: String
+    var body: String
+    var createdAt: Date
+    var updatedAt: Date
+    var localVideoFilename: String
+    var sourceAssetIdentifier: String?
+    var displayAspectRatio: Double
+    var fallbackRed: Double
+    var fallbackGreen: Double
+    var fallbackBlue: Double
+
+    init(
+        id: UUID = UUID(),
+        title: String,
+        body: String,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date(),
+        localVideoFilename: String,
+        sourceAssetIdentifier: String?,
+        displayAspectRatio: Double,
+        fallbackRed: Double,
+        fallbackGreen: Double,
+        fallbackBlue: Double
+    ) {
+        self.id = id
+        self.title = title
+        self.body = body
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.localVideoFilename = localVideoFilename
+        self.sourceAssetIdentifier = sourceAssetIdentifier
+        self.displayAspectRatio = displayAspectRatio
+        self.fallbackRed = fallbackRed
+        self.fallbackGreen = fallbackGreen
+        self.fallbackBlue = fallbackBlue
+    }
+
+    var diary: VideoDiary {
+        VideoDiary(
+            id: id,
+            title: title,
+            dateText: Self.dateFormatter.string(from: createdAt),
+            body: body,
+            localVideoFilename: localVideoFilename,
+            displayAspectRatio: CGFloat(displayAspectRatio),
+            fallbackTint: Color(red: fallbackRed, green: fallbackGreen, blue: fallbackBlue)
+        )
+    }
+
+    static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "d MMM, yyyy, HH:mm"
+        return formatter
+    }()
 }
 
 extension VideoDiary {

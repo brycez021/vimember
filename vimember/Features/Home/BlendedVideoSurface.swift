@@ -83,12 +83,15 @@ struct BlendedVideoSurface<Content: View>: View {
                 .mask(clearVideoMask)
                 .clipped()
                 .offset(y: videoYOffset)
+                .zIndex(0)
 
             pureColorBlendLayer
                 .frame(height: blendMaskHeight)
                 .offset(y: videoYOffset + blendTopOffset)
+                .zIndex(1)
 
             content(videoHeight, isLandscape, videoYOffset)
+                .zIndex(2)
         }
         .frame(width: width, height: renderHeight)
         .clipShape(Rectangle())
