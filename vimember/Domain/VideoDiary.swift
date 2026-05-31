@@ -154,6 +154,30 @@ final class VideoDiaryRecord {
 extension VideoDiary {
     static let samples: [VideoDiary] = [
         VideoDiary(
+            title: "Evening Walk Home",
+            dateText: "20 May, 2026, 21:06",
+            body: "The streetlights had just turned on, and the city looked like it was quietly changing scenes.",
+            videoResource: "sample-vertical",
+            displayAspectRatio: 720 / 1280,
+            fallbackTint: Color(red: 0.19, green: 0.20, blue: 0.14)
+        ),
+        VideoDiary(
+            title: "Wide Light Passing By",
+            dateText: "20 May, 2026, 18:12",
+            body: "The frame was wide and quiet, with just enough movement to make the afternoon feel alive.",
+            videoResource: "sample-horizontal",
+            displayAspectRatio: 1280 / 720,
+            fallbackTint: Color(red: 0.19, green: 0.15, blue: 0.11)
+        ),
+        VideoDiary(
+            title: "Late May on the Road",
+            dateText: "20 May, 2026, 10:21",
+            body: "A short road moment saved from the day. The scene moved quickly, but the colors stayed soft enough to remember.",
+            videoResource: "sample-horizontal",
+            displayAspectRatio: 1280 / 720,
+            fallbackTint: Color(red: 0.17, green: 0.14, blue: 0.11)
+        ),
+        VideoDiary(
             title: "A Quiet Cat by the Water",
             dateText: "20 May, 2026, 10:21",
             body: "This afternoon, I saw a cat sitting silently beside the lake. It stayed on the wooden steps, facing the water as the sunlight shimmered on the surface.",
@@ -168,30 +192,6 @@ extension VideoDiary {
             videoResource: "sample-wechat",
             displayAspectRatio: 320 / 568,
             fallbackTint: Color(red: 0.30, green: 0.41, blue: 0.53)
-        ),
-        VideoDiary(
-            title: "Late May on the Road",
-            dateText: "20 May, 2026, 10:21",
-            body: "A short road moment saved from the day. The scene moved quickly, but the colors stayed soft enough to remember.",
-            videoResource: "sample-horizontal",
-            displayAspectRatio: 1280 / 720,
-            fallbackTint: Color(red: 0.17, green: 0.14, blue: 0.11)
-        ),
-        VideoDiary(
-            title: "Wide Light Passing By",
-            dateText: "20 May, 2026, 18:12",
-            body: "The frame was wide and quiet, with just enough movement to make the afternoon feel alive.",
-            videoResource: "sample-horizontal",
-            displayAspectRatio: 1280 / 720,
-            fallbackTint: Color(red: 0.19, green: 0.15, blue: 0.11)
-        ),
-        VideoDiary(
-            title: "Evening Walk Home",
-            dateText: "20 May, 2026, 21:06",
-            body: "The streetlights had just turned on, and the city looked like it was quietly changing scenes.",
-            videoResource: "sample-vertical",
-            displayAspectRatio: 720 / 1280,
-            fallbackTint: Color(red: 0.19, green: 0.20, blue: 0.14)
         )
     ]
 }

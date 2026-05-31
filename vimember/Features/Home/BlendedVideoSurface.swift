@@ -54,7 +54,7 @@ struct BlendedVideoSurface<Content: View>: View {
     }
 
     private var blendHeight: CGFloat {
-        isLandscape ? width * (132 / 420) : width * (260 / 420)
+        isLandscape ? width * (96 / 420) : width * (260 / 420)
     }
 
     private var blendTopOffset: CGFloat {
@@ -63,7 +63,7 @@ struct BlendedVideoSurface<Content: View>: View {
         }
 
         let textTopOffset = videoHeight - width * (114 / 420)
-        return max(0, textTopOffset - width * (44 / 420))
+        return max(0, textTopOffset - width * (220 / 420))
     }
 
     private var blendMaskHeight: CGFloat {
@@ -71,7 +71,7 @@ struct BlendedVideoSurface<Content: View>: View {
     }
 
     private var clearVideoFadeStart: CGFloat {
-        isLandscape ? 0.62 : 1
+        isLandscape ? 0.78 : 1
     }
 
     var body: some View {
@@ -107,9 +107,9 @@ struct BlendedVideoSurface<Content: View>: View {
             LinearGradient(
                 stops: [
                     .init(color: .clear, location: 0),
-                    .init(color: bottomColor.opacity(isLandscape ? 0.10 : 0.08), location: isLandscape ? 0.30 : 0.20),
-                    .init(color: bottomColor.opacity(isLandscape ? 0.42 : 0.34), location: isLandscape ? 0.66 : 0.62),
-                    .init(color: bottomColor.opacity(0.96), location: 1)
+                    .init(color: bottomColor.opacity(isLandscape ? 0.05 : 0.16), location: isLandscape ? 0.22 : 0.18),
+                    .init(color: bottomColor.opacity(isLandscape ? 0.20 : 0.62), location: isLandscape ? 0.54 : 0.64),
+                    .init(color: bottomColor.opacity(isLandscape ? 0.60 : 0.96), location: 1)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -135,14 +135,24 @@ struct BlendedVideoSurface<Content: View>: View {
                 stops: [
                     .init(color: .black, location: 0),
                     .init(color: .black, location: clearVideoFadeStart),
-                    .init(color: .black.opacity(0.56), location: 0.80),
+                    .init(color: .black.opacity(0.50), location: 0.90),
+                    .init(color: .black.opacity(0.12), location: 0.98),
                     .init(color: .clear, location: 1)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
         } else {
-            Rectangle()
+            LinearGradient(
+                stops: [
+                    .init(color: .black, location: 0),
+                    .init(color: .black, location: 0.62),
+                    .init(color: .black.opacity(0.78), location: 0.82),
+                    .init(color: .black.opacity(0.34), location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
         }
     }
 }

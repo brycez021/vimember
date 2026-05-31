@@ -18,7 +18,6 @@ struct HomeView: View {
         GeometryReader { geometry in
             let viewport = geometry.size
             let cardWidth = min(viewport.width, 420)
-            let initialContentOffset = -cardWidth * (676 / 420)
             let screenSize = UIScreen.main.bounds.size
             let screenWidth = screenSize.width
             let screenHeight = screenSize.height
@@ -55,7 +54,6 @@ struct HomeView: View {
                         }
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.top, initialContentOffset)
                     .padding(.bottom, 28)
                 }
                 .coordinateSpace(name: "home-scroll")
