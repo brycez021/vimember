@@ -3,15 +3,22 @@ import SwiftData
 import UIKit
 
 struct HomeView: View {
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \VideoDiaryRecord.createdAt, order: .reverse) private var records: [VideoDiaryRecord]
 
     @State private var activeDiaryID: VideoDiary.ID?
     @State private var pendingVisibilityTask: Task<Void, Never>?
     @State private var isSwitcherPresented = false
     @State private var isImportPresented = false
+    @State private var selectedDiary: VideoDiary?
+    @State private var hiddenSampleIDs: Set<VideoDiary.ID> = []
+    @State private var sampleOverrides: [VideoDiary.ID: VideoDiary] = [:]
 
     private var diaries: [VideoDiary] {
-        records.map(\.diary) + VideoDiary.samples
+        records.map(\.diary) + VideoDiary.samples.compactMap { diary in
+            guard !hiddenSampleIDs.contains(diary.id) else { return nil }
+            return sampleOverrides[diary.id] ?? diary
+        }
     }
 
     var body: some View {
@@ -27,13 +34,14 @@ struct HomeView: View {
             let yScale = screenHeight / designScreenHeight
             let phoneFrameLeft = (viewport.width - cardWidth) / 2
             let topButtonSize: CGFloat = 44 * xScale
-            let topButtonTop = 69 * yScale
+            let topButtonTop = 52 * yScale
             let topButtonRight = phoneFrameLeft + cardWidth - (20 * xScale)
             let bottomSearchWidth: CGFloat = 306 * xScale
             let bottomAddButtonSize: CGFloat = 50 * xScale
             let bottomControlsGap: CGFloat = 10 * xScale
             let bottomControlsHeight: CGFloat = 50 * xScale
             let bottomControlsBottomMargin: CGFloat = 27 * yScale
+            let screenEdgeFadeHeight: CGFloat = 250 * yScale
 
             ZStack(alignment: .topTrailing) {
                 Color.white.ignoresSafeArea()
@@ -49,7 +57,8 @@ struct HomeView: View {
                             .id(diary.id)
                             .background(VisibilityReporter(id: diary.id))
                             .onTapGesture {
-                                // Detail navigation will be wired once the detail Figma frame is specified.
+                                activeDiaryID = nil
+                                selectedDiary = diary
                             }
                         }
                     }
@@ -60,6 +69,24 @@ struct HomeView: View {
                 .onPreferenceChange(CardVisibilityPreferenceKey.self) { frames in
                     scheduleActiveCardUpdate(frames: frames, viewport: viewport)
                 }
+
+                HomeScreenEdgeFadeOverlay(
+                    backgroundColor: .white,
+                    width: screenWidth,
+                    height: screenEdgeFadeHeight,
+                    edge: .top
+                )
+                .position(x: screenWidth / 2, y: screenEdgeFadeHeight / 2)
+                .allowsHitTesting(false)
+
+                HomeScreenEdgeFadeOverlay(
+                    backgroundColor: .white,
+                    width: screenWidth,
+                    height: screenEdgeFadeHeight,
+                    edge: .bottom
+                )
+                .position(x: screenWidth / 2, y: screenHeight - screenEdgeFadeHeight / 2)
+                .allowsHitTesting(false)
 
                 HomeTopButton(isPresented: $isSwitcherPresented, size: topButtonSize)
                     .position(
@@ -102,6 +129,19 @@ struct HomeView: View {
             .fullScreenCover(isPresented: $isImportPresented) {
                 AddVideoFlowView()
             }
+            .fullScreenCover(item: $selectedDiary, onDismiss: {
+                activeDiaryID = diaries.first?.id
+            }) { diary in
+                DiaryDetailView(
+                    diary: diary,
+                    onDelete: { diary in
+                        try await deleteDiary(diary)
+                    },
+                    onSaveEdit: { diary, title, body in
+                        try await saveEditedDiary(diary: diary, title: title, body: body)
+                    }
+                )
+            }
         }
     }
 
@@ -129,6 +169,45 @@ struct HomeView: View {
                 activeDiaryID = bestID
             }
         }
+    }
+
+    @MainActor
+    private func deleteDiary(_ diary: VideoDiary) async throws {
+        if let record = records.first(where: { $0.id == diary.id }) {
+            try await VideoFileStore.deleteVideo(named: record.localVideoFilename)
+            modelContext.delete(record)
+            try modelContext.save()
+        } else {
+            hiddenSampleIDs.insert(diary.id)
+            sampleOverrides[diary.id] = nil
+        }
+
+        selectedDiary = nil
+        if activeDiaryID == diary.id {
+            activeDiaryID = diaries.first?.id
+        }
+    }
+
+    @MainActor
+    private func saveEditedDiary(diary: VideoDiary, title: String, body: String) async throws -> VideoDiary {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalTitle = trimmedTitle.isEmpty ? "Title" : trimmedTitle
+
+        if let record = records.first(where: { $0.id == diary.id }) {
+            record.title = finalTitle
+            record.body = body
+            record.updatedAt = Date()
+            try modelContext.save()
+
+            let updatedDiary = record.diary
+            selectedDiary = updatedDiary
+            return updatedDiary
+        }
+
+        let updatedDiary = diary.replacingText(title: finalTitle, body: body)
+        sampleOverrides[diary.id] = updatedDiary
+        selectedDiary = updatedDiary
+        return updatedDiary
     }
 }
 
@@ -230,32 +309,39 @@ private struct HomeDiaryTextOverlay: View {
             }
         }
 
-        var titleTopFromBottom: CGFloat { 114 }
+        var titleTopFromBottom: CGFloat {
+            switch self {
+            case .vertical:
+                return 125
+            case .landscape:
+                return 125
+            }
+        }
 
         var dateTopFromBottom: CGFloat {
             switch self {
             case .vertical:
-                return 80.67
+                return 91.5
             case .landscape:
-                return 80.67
+                return 91.5
             }
         }
 
         var dividerTopFromBottom: CGFloat {
             switch self {
             case .vertical:
-                return 55
+                return 66
             case .landscape:
-                return 55
+                return 66
             }
         }
 
         var bodyTopFromBottom: CGFloat {
             switch self {
             case .vertical:
-                return 51.33
+                return 60.5
             case .landscape:
-                return 51.33
+                return 60.5
             }
         }
 
@@ -298,9 +384,9 @@ private struct HomeDiaryTextOverlay: View {
         var groupYOffset: CGFloat {
             switch self {
             case .vertical:
-                return -7.33
+                return 0
             case .landscape:
-                return -7.33
+                return 0
             }
         }
     }
@@ -460,6 +546,76 @@ private struct HomeTopButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Switch settings")
+    }
+}
+
+private struct HomeScreenEdgeFadeOverlay: View {
+    enum FadeEdge {
+        case top
+        case bottom
+    }
+
+    let backgroundColor: Color
+    let width: CGFloat
+    let height: CGFloat
+    let edge: FadeEdge
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .opacity(0.16)
+                .mask(
+                    smoothMask(
+                        transparentUntil: 0.20,
+                        softPoint: 0.56,
+                        softOpacity: 0.20
+                    )
+                )
+
+            Rectangle()
+                .fill(.thinMaterial)
+                .opacity(0.18)
+                .mask(
+                    smoothMask(
+                        transparentUntil: 0.42,
+                        softPoint: 0.76,
+                        softOpacity: 0.22
+                    )
+                )
+
+            LinearGradient(
+                stops: [
+                    .init(color: backgroundColor.opacity(0), location: 0),
+                    .init(color: backgroundColor.opacity(0), location: 0.24),
+                    .init(color: backgroundColor.opacity(0.04), location: 0.50),
+                    .init(color: backgroundColor.opacity(0.14), location: 0.74),
+                    .init(color: backgroundColor.opacity(0.32), location: 0.92),
+                    .init(color: backgroundColor.opacity(0.42), location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        .scaleEffect(y: edge == .top ? -1 : 1, anchor: .center)
+        .frame(width: width, height: height)
+    }
+
+    private func smoothMask(
+        transparentUntil: CGFloat,
+        softPoint: CGFloat,
+        softOpacity: Double
+    ) -> some View {
+        LinearGradient(
+            stops: [
+                .init(color: .clear, location: 0),
+                .init(color: .clear, location: transparentUntil),
+                .init(color: .white.opacity(softOpacity), location: softPoint),
+                .init(color: .white, location: 1)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 }
 

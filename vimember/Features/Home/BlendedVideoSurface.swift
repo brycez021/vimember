@@ -1,5 +1,11 @@
 import SwiftUI
 
+enum BlendedVideoSurfaceLayout {
+    case topAnchored
+    case centeredLandscapeEdges
+    case centeredEdges
+}
+
 struct BlendedVideoSurface<Content: View>: View {
     let url: URL?
     let aspectRatio: CGFloat
@@ -8,6 +14,8 @@ struct BlendedVideoSurface<Content: View>: View {
     let width: CGFloat
     let height: CGFloat?
     let videoYOffset: CGFloat
+    let layout: BlendedVideoSurfaceLayout
+    let onBottomColorChange: ((Color) -> Void)?
     let content: (_ videoHeight: CGFloat, _ isLandscape: Bool, _ videoYOffset: CGFloat) -> Content
 
     @State private var bottomColor: Color
@@ -20,6 +28,8 @@ struct BlendedVideoSurface<Content: View>: View {
         width: CGFloat,
         height: CGFloat? = nil,
         videoYOffset: CGFloat = 0,
+        layout: BlendedVideoSurfaceLayout = .topAnchored,
+        onBottomColorChange: ((Color) -> Void)? = nil,
         @ViewBuilder content: @escaping (_ videoHeight: CGFloat, _ isLandscape: Bool, _ videoYOffset: CGFloat) -> Content
     ) {
         self.url = url
@@ -29,6 +39,8 @@ struct BlendedVideoSurface<Content: View>: View {
         self.width = width
         self.height = height
         self.videoYOffset = videoYOffset
+        self.layout = layout
+        self.onBottomColorChange = onBottomColorChange
         self.content = content
         _bottomColor = State(initialValue: fallbackTint)
     }
@@ -54,7 +66,24 @@ struct BlendedVideoSurface<Content: View>: View {
     }
 
     private var blendHeight: CGFloat {
-        isLandscape ? width * (96 / 420) : width * (260 / 420)
+        usesCompactEdgeBlend ? width * (96 / 420) : width * (260 / 420)
+    }
+
+    private var usesCenteredEdges: Bool {
+        layout == .centeredLandscapeEdges || layout == .centeredEdges
+    }
+
+    private var usesCompactEdgeBlend: Bool {
+        isLandscape || layout == .centeredEdges
+    }
+
+    private var resolvedVideoYOffset: CGFloat {
+        guard usesCenteredEdges else {
+            return videoYOffset
+        }
+
+        let centeredYOffset = (renderHeight - videoHeight) / 2
+        return layout == .centeredLandscapeEdges ? max(0, centeredYOffset) : centeredYOffset
     }
 
     private var blendTopOffset: CGFloat {
@@ -71,7 +100,7 @@ struct BlendedVideoSurface<Content: View>: View {
     }
 
     private var clearVideoFadeStart: CGFloat {
-        isLandscape ? 0.78 : 1
+        usesCompactEdgeBlend ? 0.78 : 1
     }
 
     var body: some View {
@@ -82,15 +111,20 @@ struct BlendedVideoSurface<Content: View>: View {
                 .frame(width: width, height: videoHeight)
                 .mask(clearVideoMask)
                 .clipped()
-                .offset(y: videoYOffset)
+                .offset(y: resolvedVideoYOffset)
                 .zIndex(0)
 
-            pureColorBlendLayer
-                .frame(height: blendMaskHeight)
-                .offset(y: videoYOffset + blendTopOffset)
-                .zIndex(1)
+            if usesCenteredEdges {
+                centeredLandscapeEdgeBlendLayers
+                    .zIndex(1)
+            } else {
+                pureColorBlendLayer
+                    .frame(height: blendMaskHeight)
+                    .offset(y: resolvedVideoYOffset + blendTopOffset)
+                    .zIndex(1)
+            }
 
-            content(videoHeight, isLandscape, videoYOffset)
+            content(videoHeight, isLandscape, resolvedVideoYOffset)
                 .zIndex(2)
         }
         .frame(width: width, height: renderHeight)
@@ -99,6 +133,20 @@ struct BlendedVideoSurface<Content: View>: View {
             guard let url else { return }
             let sample = await VideoColorSampler.shared.sample(for: url, fallback: fallbackTint)
             bottomColor = sample.bottomColor
+            onBottomColorChange?(sample.bottomColor)
+        }
+    }
+
+    private var centeredLandscapeEdgeBlendLayers: some View {
+        ZStack(alignment: .top) {
+            pureColorBlendLayer
+                .frame(height: blendMaskHeight)
+                .scaleEffect(y: -1, anchor: .center)
+                .offset(y: resolvedVideoYOffset - colorBlockOverflow)
+
+            pureColorBlendLayer
+                .frame(height: blendMaskHeight)
+                .offset(y: resolvedVideoYOffset + blendTopOffset)
         }
     }
 
@@ -107,9 +155,9 @@ struct BlendedVideoSurface<Content: View>: View {
             LinearGradient(
                 stops: [
                     .init(color: .clear, location: 0),
-                    .init(color: bottomColor.opacity(isLandscape ? 0.05 : 0.16), location: isLandscape ? 0.22 : 0.18),
-                    .init(color: bottomColor.opacity(isLandscape ? 0.20 : 0.62), location: isLandscape ? 0.54 : 0.64),
-                    .init(color: bottomColor.opacity(isLandscape ? 0.60 : 0.96), location: 1)
+                    .init(color: bottomColor.opacity(usesCompactEdgeBlend ? 0.05 : 0.16), location: usesCompactEdgeBlend ? 0.22 : 0.18),
+                    .init(color: bottomColor.opacity(usesCompactEdgeBlend ? 0.20 : 0.62), location: usesCompactEdgeBlend ? 0.54 : 0.64),
+                    .init(color: bottomColor.opacity(usesCompactEdgeBlend ? 0.60 : 0.96), location: 1)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -118,7 +166,7 @@ struct BlendedVideoSurface<Content: View>: View {
             LinearGradient(
                 stops: [
                     .init(color: .clear, location: 0),
-                    .init(color: .white.opacity(isLandscape ? 0.05 : 0.04), location: 0.42),
+                    .init(color: .white.opacity(usesCompactEdgeBlend ? 0.05 : 0.04), location: 0.42),
                     .init(color: .clear, location: 0.72)
                 ],
                 startPoint: .top,
@@ -130,7 +178,22 @@ struct BlendedVideoSurface<Content: View>: View {
 
     @ViewBuilder
     private var clearVideoMask: some View {
-        if isLandscape {
+        if usesCenteredEdges {
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .black.opacity(0.12), location: 0.02),
+                    .init(color: .black.opacity(0.50), location: 0.10),
+                    .init(color: .black, location: 0.22),
+                    .init(color: .black, location: clearVideoFadeStart),
+                    .init(color: .black.opacity(0.50), location: 0.90),
+                    .init(color: .black.opacity(0.12), location: 0.98),
+                    .init(color: .clear, location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        } else if isLandscape {
             LinearGradient(
                 stops: [
                     .init(color: .black, location: 0),
@@ -165,7 +228,9 @@ extension BlendedVideoSurface where Content == EmptyView {
         isPlaying: Bool,
         width: CGFloat,
         height: CGFloat? = nil,
-        videoYOffset: CGFloat = 0
+        videoYOffset: CGFloat = 0,
+        layout: BlendedVideoSurfaceLayout = .topAnchored,
+        onBottomColorChange: ((Color) -> Void)? = nil
     ) {
         self.init(
             url: url,
@@ -174,7 +239,9 @@ extension BlendedVideoSurface where Content == EmptyView {
             isPlaying: isPlaying,
             width: width,
             height: height,
-            videoYOffset: videoYOffset
+            videoYOffset: videoYOffset,
+            layout: layout,
+            onBottomColorChange: onBottomColorChange
         ) { _, _, _ in
             EmptyView()
         }

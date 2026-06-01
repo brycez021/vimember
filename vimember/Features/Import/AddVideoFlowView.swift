@@ -427,7 +427,19 @@ private struct AddVideoEditorView: View {
     @State private var bodyText = ""
     @State private var isSaving = false
     @State private var saveError: String?
+    @State private var videoBackgroundColor: Color
     @FocusState private var focusedField: AddVideoEditorField?
+
+    init(
+        draft: VideoImportDraft,
+        onBack: @escaping () -> Void,
+        onComplete: @escaping (_ title: String, _ body: String) async throws -> Void
+    ) {
+        self.draft = draft
+        self.onBack = onBack
+        self.onComplete = onComplete
+        _videoBackgroundColor = State(initialValue: draft.fallbackTint)
+    }
 
     var body: some View {
         GeometryReader { _ in
@@ -439,6 +451,8 @@ private struct AddVideoEditorView: View {
             let xScale = screenWidth / designWidth
             let yScale = screenHeight / designHeight
             let buttonSize = 44 * xScale
+            let buttonTop = 52 * yScale
+            let buttonSide = 20 * xScale
 
             ScrollViewReader { proxy in
                 ZStack(alignment: .topLeading) {
@@ -448,6 +462,9 @@ private struct AddVideoEditorView: View {
                                 draft: draft,
                                 screenWidth: screenWidth,
                                 screenHeight: screenHeight,
+                                onBottomColorChange: { color in
+                                    videoBackgroundColor = color
+                                },
                                 onDown: {
                                     withAnimation(.snappy(duration: 0.38)) {
                                         proxy.scrollTo("text", anchor: .top)
@@ -461,6 +478,8 @@ private struct AddVideoEditorView: View {
                                 title: $title,
                                 bodyText: $bodyText,
                                 focusedField: $focusedField,
+                                dateText: VideoDiaryRecord.dateFormatter.string(from: Date()),
+                                backgroundColor: videoBackgroundColor,
                                 screenWidth: screenWidth,
                                 screenHeight: screenHeight,
                                 onUp: {
@@ -470,16 +489,16 @@ private struct AddVideoEditorView: View {
                                     }
                                 }
                             )
-                            .frame(width: screenWidth, height: screenHeight)
+                            .frame(width: screenWidth)
                             .id("text")
                         }
                     }
-                    .scrollTargetBehavior(.paging)
+                    .scrollDismissesKeyboard(.interactively)
                     .ignoresSafeArea()
                     .onAppear {
                         DispatchQueue.main.async {
-                            proxy.scrollTo("text", anchor: .top)
-                            focusedField = .body
+                            proxy.scrollTo("video", anchor: .top)
+                            focusedField = nil
                         }
                     }
 
@@ -488,7 +507,7 @@ private struct AddVideoEditorView: View {
                         size: buttonSize,
                         action: onBack
                     )
-                    .position(x: (20 * xScale) + buttonSize / 2, y: (69 * yScale) + buttonSize / 2)
+                    .position(x: buttonSide + buttonSize / 2, y: buttonTop + buttonSize / 2)
 
                     FigmaGlassCircleButton(
                         systemName: "checkmark",
@@ -500,13 +519,13 @@ private struct AddVideoEditorView: View {
                             }
                         }
                     )
-                    .position(x: screenWidth - (20 * xScale) - buttonSize / 2, y: (69 * yScale) + buttonSize / 2)
+                    .position(x: screenWidth - buttonSide - buttonSize / 2, y: buttonTop + buttonSize / 2)
 
                     if isSaving {
                         ProgressView()
                             .tint(.white)
                             .frame(width: buttonSize, height: buttonSize)
-                            .position(x: screenWidth - (20 * xScale) - buttonSize / 2, y: (69 * yScale) + buttonSize / 2)
+                            .position(x: screenWidth - buttonSide - buttonSize / 2, y: buttonTop + buttonSize / 2)
                     }
                 }
                 .overlay(alignment: .bottom) {
@@ -541,19 +560,176 @@ private struct AddVideoEditorView: View {
     }
 }
 
+struct EditVideoDiaryFlowView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let diary: VideoDiary
+    let onComplete: (_ title: String, _ body: String) async throws -> Void
+
+    @State private var title: String
+    @State private var bodyText: String
+    @State private var isSaving = false
+    @State private var saveError: String?
+    @State private var videoBackgroundColor: Color
+    @FocusState private var focusedField: AddVideoEditorField?
+
+    init(
+        diary: VideoDiary,
+        onComplete: @escaping (_ title: String, _ body: String) async throws -> Void
+    ) {
+        self.diary = diary
+        self.onComplete = onComplete
+        _title = State(initialValue: diary.title)
+        _bodyText = State(initialValue: diary.body)
+        _videoBackgroundColor = State(initialValue: diary.fallbackTint)
+    }
+
+    var body: some View {
+        GeometryReader { _ in
+            let realScreenSize = UIScreen.main.bounds.size
+            let screenWidth = realScreenSize.width
+            let screenHeight = realScreenSize.height
+            let designWidth: CGFloat = 420
+            let designHeight: CGFloat = 912
+            let xScale = screenWidth / designWidth
+            let yScale = screenHeight / designHeight
+            let buttonSize = 44 * xScale
+            let buttonTop = 52 * yScale
+            let buttonSide = 20 * xScale
+
+            ScrollViewReader { proxy in
+                ZStack(alignment: .topLeading) {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 0) {
+                            AddVideoPreviewPage(
+                                videoURL: diary.videoURL,
+                                aspectRatio: diary.displayAspectRatio,
+                                fallbackTint: diary.fallbackTint,
+                                screenWidth: screenWidth,
+                                screenHeight: screenHeight,
+                                onBottomColorChange: { color in
+                                    videoBackgroundColor = color
+                                },
+                                onDown: {
+                                    withAnimation(.snappy(duration: 0.38)) {
+                                        proxy.scrollTo("text", anchor: .top)
+                                    }
+                                }
+                            )
+                            .frame(width: screenWidth, height: screenHeight)
+                            .id("video")
+
+                            AddTextPage(
+                                title: $title,
+                                bodyText: $bodyText,
+                                focusedField: $focusedField,
+                                dateText: diary.dateText,
+                                backgroundColor: videoBackgroundColor,
+                                screenWidth: screenWidth,
+                                screenHeight: screenHeight,
+                                onUp: {
+                                    focusedField = nil
+                                    withAnimation(.snappy(duration: 0.38)) {
+                                        proxy.scrollTo("video", anchor: .top)
+                                    }
+                                }
+                            )
+                            .frame(width: screenWidth)
+                            .id("text")
+                        }
+                    }
+                    .scrollDismissesKeyboard(.interactively)
+                    .ignoresSafeArea()
+                    .onAppear {
+                        DispatchQueue.main.async {
+                            proxy.scrollTo("text", anchor: .top)
+                            focusedField = .body
+                        }
+                    }
+
+                    FigmaGlassCircleButton(
+                        systemName: "chevron.left",
+                        size: buttonSize,
+                        action: {
+                            dismiss()
+                        }
+                    )
+                    .position(x: buttonSide + buttonSize / 2, y: buttonTop + buttonSize / 2)
+
+                    FigmaGlassCircleButton(
+                        systemName: "checkmark",
+                        size: buttonSize,
+                        isEnabled: !isSaving,
+                        action: {
+                            Task {
+                                await complete()
+                            }
+                        }
+                    )
+                    .position(x: screenWidth - buttonSide - buttonSize / 2, y: buttonTop + buttonSize / 2)
+
+                    if isSaving {
+                        ProgressView()
+                            .tint(.white)
+                            .frame(width: buttonSize, height: buttonSize)
+                            .position(x: screenWidth - buttonSide - buttonSize / 2, y: buttonTop + buttonSize / 2)
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if let saveError {
+                        Text(saveError)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(.black.opacity(0.72), in: Capsule())
+                            .padding(.bottom, 26)
+                    }
+                }
+                .frame(width: screenWidth, height: screenHeight)
+                .ignoresSafeArea()
+            }
+        }
+        .ignoresSafeArea()
+    }
+
+    @MainActor
+    private func complete() async {
+        isSaving = true
+        saveError = nil
+
+        do {
+            try await onComplete(title.trimmingCharacters(in: .whitespacesAndNewlines), bodyText)
+            dismiss()
+        } catch {
+            saveError = "Unable to save this video diary."
+            isSaving = false
+        }
+    }
+}
+
 private struct AddTextPage: View {
     @Binding var title: String
     @Binding var bodyText: String
     var focusedField: FocusState<AddVideoEditorField?>.Binding
+    let dateText: String
+    let backgroundColor: Color
     let screenWidth: CGFloat
     let screenHeight: CGFloat
     let onUp: () -> Void
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            AddVideoDesign.textPageBackground
-                .ignoresSafeArea()
+        let xScale = screenWidth / 420
+        let yScale = screenHeight / 912
+        let textLeft = 23 * xScale
+        let textTop = 140 * yScale
+        let textWidth = min(384 * xScale, screenWidth - textLeft * 2)
+        let dividerWidth = min(374 * xScale, textWidth)
+        let buttonSize = 44 * xScale
+        let buttonTop = 52 * yScale
+        let arrowCenterY = buttonTop + buttonSize / 2
 
+        ZStack(alignment: .topLeading) {
             Button(action: onUp) {
                 Image(systemName: "chevron.up")
                     .font(.system(size: 35, weight: .medium))
@@ -562,52 +738,59 @@ private struct AddTextPage: View {
                     .frame(width: 50, height: 44)
             }
             .buttonStyle(.plain)
-            .position(x: screenWidth / 2, y: screenHeight * (85 / 912) + 15)
+            .position(x: screenWidth / 2, y: arrowCenterY)
 
             VStack(alignment: .leading, spacing: 0) {
-                TextField("Title", text: $title)
-                    .font(.system(size: 30, weight: .semibold))
+                TextField(
+                    "",
+                    text: $title,
+                    prompt: Text("Title")
+                        .foregroundStyle(.white)
+                )
+                    .font(.custom("PingFangSC-Semibold", size: 30))
+                    .tracking(0.3)
                     .foregroundStyle(.white)
                     .tint(.white)
                     .focused(focusedField, equals: .title)
-                    .frame(height: 30)
+                    .frame(height: 36)
+                    .padding(.bottom, 2)
 
-                Text(VideoDiaryRecord.dateFormatter.string(from: Date()))
-                    .font(.system(size: 16, weight: .medium))
+                Text(dateText)
+                    .font(.custom("PingFangSC-Medium", size: 16))
                     .tracking(0.16)
                     .foregroundStyle(.white)
-                    .padding(.top, 3)
+                    .frame(height: 22, alignment: .topLeading)
+                    .offset(y: -6)
+                    .padding(.bottom, 4)
 
                 Rectangle()
-                    .fill(.white.opacity(0.64))
-                    .frame(height: 0.5)
-                    .padding(.top, 14)
+                    .fill(.white.opacity(0.68))
+                    .frame(width: dividerWidth, height: max(0.5, 0.5 * xScale))
+                    .padding(.bottom, 14)
 
                 ZStack(alignment: .topLeading) {
                     if bodyText.isEmpty {
-                        Text("Start writing...")
-                            .font(.system(size: 16, weight: .regular))
-                            .tracking(0.16)
-                            .foregroundStyle(.white.opacity(0.92))
-                            .padding(.top, 8)
+                        AddTextPlaceholderLabel(
+                            text: "Start writing...",
+                            labelWidth: textWidth
+                        )
                             .allowsHitTesting(false)
                     }
 
-                    TextEditor(text: $bodyText)
-                        .font(.system(size: 16, weight: .regular))
-                        .tracking(0.16)
-                        .foregroundStyle(.white)
-                        .tint(.white)
-                        .scrollContentBackground(.hidden)
-                        .background(.clear)
-                        .focused(focusedField, equals: .body)
-                        .frame(height: 276)
-                        .padding(.horizontal, -5)
+                    AddBodyTextView(
+                        text: $bodyText,
+                        focusedField: focusedField,
+                        preferredWidth: textWidth
+                    )
                 }
             }
-            .frame(width: screenWidth - 48, alignment: .leading)
-            .position(x: screenWidth / 2, y: screenHeight * (266 / 912) + 179)
+            .frame(width: textWidth, alignment: .leading)
+            .padding(.leading, textLeft)
+            .padding(.top, textTop)
         }
+        .frame(width: screenWidth, alignment: .topLeading)
+        .frame(minHeight: screenHeight, alignment: .topLeading)
+        .background(backgroundColor.ignoresSafeArea())
     }
 }
 
@@ -616,25 +799,199 @@ private enum AddVideoEditorField {
     case body
 }
 
+private struct AddTextPlaceholderLabel: UIViewRepresentable {
+    let text: String
+    let labelWidth: CGFloat
+
+    func makeUIView(context: Context) -> UILabel {
+        let label = UILabel()
+        label.backgroundColor = .clear
+        label.numberOfLines = 0
+        label.lineBreakMode = .byWordWrapping
+        return label
+    }
+
+    func updateUIView(_ label: UILabel, context: Context) {
+        label.preferredMaxLayoutWidth = labelWidth
+        label.attributedText = attributedText
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UILabel, context: Context) -> CGSize? {
+        CGSize(width: labelWidth, height: 22)
+    }
+
+    private var attributedText: NSAttributedString {
+        NSAttributedString(string: text, attributes: Self.textAttributes)
+    }
+
+    private static var textAttributes: [NSAttributedString.Key: Any] {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = 22
+        paragraph.maximumLineHeight = 22
+        paragraph.lineBreakMode = .byWordWrapping
+
+        let font = UIFont(name: "PingFangSC-Regular", size: 16)
+            ?? .systemFont(ofSize: 16, weight: .regular)
+
+        return [
+            .font: font,
+            .foregroundColor: UIColor.white.withAlphaComponent(0.92),
+            .kern: 0.16,
+            .paragraphStyle: paragraph
+        ]
+    }
+}
+
+private struct AddBodyTextView: UIViewRepresentable {
+    @Binding var text: String
+    var focusedField: FocusState<AddVideoEditorField?>.Binding
+    let preferredWidth: CGFloat
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.delegate = context.coordinator
+        textView.backgroundColor = .clear
+        textView.textColor = .white
+        textView.tintColor = .white
+        textView.textContainerInset = .zero
+        textView.textContainer.lineFragmentPadding = 0
+        textView.isScrollEnabled = false
+        textView.showsVerticalScrollIndicator = false
+        textView.alwaysBounceVertical = false
+        textView.autocorrectionType = .yes
+        textView.autocapitalizationType = .sentences
+        textView.keyboardDismissMode = .interactive
+        textView.typingAttributes = Self.textAttributes
+        textView.setContentHuggingPriority(.required, for: .vertical)
+        textView.setContentCompressionResistancePriority(.required, for: .vertical)
+        return textView
+    }
+
+    func updateUIView(_ textView: UITextView, context: Context) {
+        context.coordinator.parent = self
+
+        if textView.text != text {
+            textView.attributedText = NSAttributedString(string: text, attributes: Self.textAttributes)
+        }
+        textView.typingAttributes = Self.textAttributes
+
+        if focusedField.wrappedValue == .body {
+            if !textView.isFirstResponder {
+                textView.becomeFirstResponder()
+            }
+        } else if textView.isFirstResponder {
+            textView.resignFirstResponder()
+        }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        let width = proposal.width ?? preferredWidth
+        let fittingSize = uiView.sizeThatFits(
+            CGSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        )
+        return CGSize(width: width, height: max(22, fittingSize.height))
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: AddBodyTextView
+
+        init(_ parent: AddBodyTextView) {
+            self.parent = parent
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            parent.focusedField.wrappedValue = .body
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            if parent.focusedField.wrappedValue == .body {
+                parent.focusedField.wrappedValue = nil
+            }
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text
+            textView.typingAttributes = AddBodyTextView.textAttributes
+        }
+    }
+
+    private static var textAttributes: [NSAttributedString.Key: Any] {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = 22
+        paragraph.maximumLineHeight = 22
+        paragraph.paragraphSpacing = 16
+        paragraph.lineBreakMode = .byWordWrapping
+
+        let font = UIFont(name: "PingFangSC-Regular", size: 16)
+            ?? .systemFont(ofSize: 16, weight: .regular)
+
+        return [
+            .font: font,
+            .foregroundColor: UIColor.white,
+            .kern: 0.16,
+            .paragraphStyle: paragraph
+        ]
+    }
+}
+
 private struct AddVideoPreviewPage: View {
-    let draft: VideoImportDraft
+    let videoURL: URL?
+    let aspectRatio: CGFloat
+    let fallbackTint: Color
     let screenWidth: CGFloat
     let screenHeight: CGFloat
+    let onBottomColorChange: ((Color) -> Void)?
     let onDown: () -> Void
 
-    var body: some View {
-        let videoHeight = screenWidth / max(draft.aspectRatio, 0.1)
-        let videoYOffset = max(0, (screenHeight - videoHeight) / 2)
+    init(
+        draft: VideoImportDraft,
+        screenWidth: CGFloat,
+        screenHeight: CGFloat,
+        onBottomColorChange: ((Color) -> Void)? = nil,
+        onDown: @escaping () -> Void
+    ) {
+        self.videoURL = draft.previewURL
+        self.aspectRatio = draft.aspectRatio
+        self.fallbackTint = draft.fallbackTint
+        self.screenWidth = screenWidth
+        self.screenHeight = screenHeight
+        self.onBottomColorChange = onBottomColorChange
+        self.onDown = onDown
+    }
 
+    init(
+        videoURL: URL?,
+        aspectRatio: CGFloat,
+        fallbackTint: Color,
+        screenWidth: CGFloat,
+        screenHeight: CGFloat,
+        onBottomColorChange: ((Color) -> Void)? = nil,
+        onDown: @escaping () -> Void
+    ) {
+        self.videoURL = videoURL
+        self.aspectRatio = aspectRatio
+        self.fallbackTint = fallbackTint
+        self.screenWidth = screenWidth
+        self.screenHeight = screenHeight
+        self.onBottomColorChange = onBottomColorChange
+        self.onDown = onDown
+    }
+
+    var body: some View {
         ZStack(alignment: .topLeading) {
             BlendedVideoSurface(
-                url: draft.previewURL,
-                aspectRatio: draft.aspectRatio,
-                fallbackTint: draft.fallbackTint,
+                url: videoURL,
+                aspectRatio: aspectRatio,
+                fallbackTint: fallbackTint,
                 isPlaying: true,
                 width: screenWidth,
                 height: screenHeight,
-                videoYOffset: videoYOffset
+                layout: .centeredEdges,
+                onBottomColorChange: onBottomColorChange
             )
             .ignoresSafeArea()
 

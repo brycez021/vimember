@@ -89,6 +89,31 @@ struct VideoDiary: Identifiable, Equatable {
     var isLandscapeVideo: Bool {
         displayAspectRatio > 1
     }
+
+    func replacingText(title: String, body: String) -> VideoDiary {
+        if let localVideoFilename {
+            return VideoDiary(
+                id: id,
+                title: title,
+                dateText: dateText,
+                body: body,
+                localVideoFilename: localVideoFilename,
+                displayAspectRatio: displayAspectRatio,
+                fallbackTint: fallbackTint
+            )
+        }
+
+        return VideoDiary(
+            id: id,
+            title: title,
+            dateText: dateText,
+            body: body,
+            videoResource: videoResource,
+            localVideoFilename: nil,
+            displayAspectRatio: displayAspectRatio,
+            fallbackTint: fallbackTint
+        )
+    }
 }
 
 @Model
@@ -154,44 +179,36 @@ final class VideoDiaryRecord {
 extension VideoDiary {
     static let samples: [VideoDiary] = [
         VideoDiary(
-            title: "Evening Walk Home",
-            dateText: "20 May, 2026, 21:06",
-            body: "The streetlights had just turned on, and the city looked like it was quietly changing scenes.",
-            videoResource: "sample-vertical",
-            displayAspectRatio: 720 / 1280,
-            fallbackTint: Color(red: 0.19, green: 0.20, blue: 0.14)
+            title: "Street Corner Pause",
+            dateText: "31 May, 2026, 22:41",
+            body: "A quick vertical moment from the street. Nothing dramatic happened, but the frame kept a small piece of the day exactly as it felt. The path was bright in patches, then quiet under the leaves, and every few seconds the light changed enough to make the same wall feel like a different place. I remember the small shake of the phone, the sound of wheels on the pavement, and the way the afternoon kept opening up ahead. It was not an important scene in the usual sense, but it had that strange diary quality where a plain minute becomes more accurate than a polished photograph. Later, when I watched it back, I noticed things I missed while moving through it: the shadow crossing the road, the color on the wall, the slow turn of the handlebar, the tiny pause before the rider passed into sun again.",
+            videoResource: "sample-street-vertical",
+            displayAspectRatio: 720.0 / 1280.0,
+            fallbackTint: Color(red: 0.22, green: 0.25, blue: 0.23)
         ),
         VideoDiary(
-            title: "Wide Light Passing By",
-            dateText: "20 May, 2026, 18:12",
-            body: "The frame was wide and quiet, with just enough movement to make the afternoon feel alive.",
-            videoResource: "sample-horizontal",
-            displayAspectRatio: 1280 / 720,
-            fallbackTint: Color(red: 0.19, green: 0.15, blue: 0.11)
+            title: "Campus Voices",
+            dateText: "31 May, 2026, 20:53",
+            body: "People gathered around the plaza while the afternoon kept moving in the background. The wide frame makes the scene feel almost like a note pinned to a busy public day.",
+            videoResource: "sample-campus-wide",
+            displayAspectRatio: 1920.0 / 1080.0,
+            fallbackTint: Color(red: 0.44, green: 0.49, blue: 0.55)
         ),
         VideoDiary(
-            title: "Late May on the Road",
-            dateText: "20 May, 2026, 10:21",
-            body: "A short road moment saved from the day. The scene moved quickly, but the colors stayed soft enough to remember.",
-            videoResource: "sample-horizontal",
-            displayAspectRatio: 1280 / 720,
-            fallbackTint: Color(red: 0.17, green: 0.14, blue: 0.11)
+            title: "City Light Ride",
+            dateText: "31 May, 2026, 19:26",
+            body: "The phone stayed upright while the city slipped past in layers: reflected lights, moving shadows, and little flashes of color that only make sense when they are played back later. I like how this kind of clip does not explain the whole day. It just saves the rhythm of being there.",
+            videoResource: "sample-city-vertical",
+            displayAspectRatio: 2160.0 / 3840.0,
+            fallbackTint: Color(red: 0.28, green: 0.30, blue: 0.34)
         ),
         VideoDiary(
-            title: "A Quiet Cat by the Water",
-            dateText: "20 May, 2026, 10:21",
-            body: "This afternoon, I saw a cat sitting silently beside the lake. It stayed on the wooden steps, facing the water as the sunlight shimmered on the surface.",
-            videoResource: "sample-vertical",
-            displayAspectRatio: 720 / 1280,
-            fallbackTint: Color(red: 0.23, green: 0.31, blue: 0.40)
-        ),
-        VideoDiary(
-            title: "Snowlight on the Street",
-            dateText: "19 May, 2026, 13:48",
-            body: "Today the city felt unusually quiet, as if the snow had softened every sound. The streets were bright under a clear blue sky, and the buildings looked clean and gentle.",
-            videoResource: "sample-wechat",
-            displayAspectRatio: 320 / 568,
-            fallbackTint: Color(red: 0.30, green: 0.41, blue: 0.53)
+            title: "Office Table",
+            dateText: "31 May, 2026, 18:08",
+            body: "Just a few seconds from the room before leaving.",
+            videoResource: "sample-office-wide",
+            displayAspectRatio: 1280.0 / 720.0,
+            fallbackTint: Color(red: 0.33, green: 0.31, blue: 0.27)
         )
     ]
 }

@@ -41,4 +41,15 @@ enum VideoFileStore {
             return filename
         }.value
     }
+
+    static func deleteVideo(named filename: String) async throws {
+        try await Task.detached(priority: .utility) {
+            let url = try videosDirectory.appending(path: filename)
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                return
+            }
+
+            try FileManager.default.removeItem(at: url)
+        }.value
+    }
 }
