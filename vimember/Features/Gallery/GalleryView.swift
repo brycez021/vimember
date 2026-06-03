@@ -46,10 +46,12 @@ struct GalleryView: View {
                         GalleryAlbumStrip(
                             diaries: diaries,
                             albums: albums,
+                            selectedAlbumID: nil,
                             xScale: xScale,
                             onAddAlbum: {
                                 showAddAlbumComposer()
-                            }
+                            },
+                            onSelectAlbum: { _ in }
                         )
                             .frame(width: screenWidth, height: 92 * xScale)
                             .offset(y: albumTop)
@@ -176,7 +178,7 @@ struct GalleryView: View {
     }
 }
 
-private struct GalleryAlbumBackdrop: View {
+struct GalleryAlbumBackdrop: View {
     let height: CGFloat
 
     var body: some View {
@@ -193,7 +195,7 @@ private struct GalleryAlbumBackdrop: View {
     }
 }
 
-private struct GallerySectionTitle: View {
+struct GallerySectionTitle: View {
     let title: String
     let xScale: CGFloat
 
@@ -211,11 +213,14 @@ private struct GallerySectionTitle: View {
     }
 }
 
-private struct GalleryAlbumStrip: View {
+struct GalleryAlbumStrip: View {
     let diaries: [VideoDiary]
     let albums: [VideoAlbum]
+    let selectedAlbumID: VideoAlbum.ID?
     let xScale: CGFloat
+    var selectedPointerOffsetY: CGFloat = 0
     let onAddAlbum: () -> Void
+    let onSelectAlbum: (VideoAlbum.ID) -> Void
 
     private var albumItems: [GalleryAlbumDisplayItem] {
         let realItems = albums.compactMap { album -> GalleryAlbumDisplayItem? in
@@ -226,6 +231,7 @@ private struct GalleryAlbumStrip: View {
 
             return GalleryAlbumDisplayItem(
                 id: "album-\(album.id.uuidString)",
+                albumID: album.id,
                 title: album.name,
                 coverDiary: coverDiary
             )
@@ -235,6 +241,7 @@ private struct GalleryAlbumStrip: View {
         let fillerItems = diaries.prefix(fillerCount).map { diary in
             GalleryAlbumDisplayItem(
                 id: "diary-\(diary.id.uuidString)",
+                albumID: diary.id,
                 title: albumTitle(for: diary),
                 coverDiary: diary
             )
@@ -249,10 +256,19 @@ private struct GalleryAlbumStrip: View {
                 GalleryAddAlbumPlaceholder(size: 70 * xScale, action: onAddAlbum)
 
                 ForEach(albumItems) { item in
+                    let isSelected = item.albumID == selectedAlbumID
+                    let isDimmed = selectedAlbumID != nil && item.albumID != selectedAlbumID
                     GalleryAlbumItem(
                         title: item.title,
                         coverDiary: item.coverDiary,
-                        size: 70 * xScale
+                        size: 70 * xScale,
+                        isSelected: isSelected,
+                        isDimmed: isDimmed,
+                        selectedPointerOffsetY: selectedPointerOffsetY,
+                        action: {
+                            guard let albumID = item.albumID else { return }
+                            onSelectAlbum(albumID)
+                        }
                     )
                 }
             }
@@ -273,6 +289,7 @@ private struct GalleryAlbumStrip: View {
 
 private struct GalleryAlbumDisplayItem: Identifiable {
     let id: String
+    let albumID: VideoAlbum.ID?
     let title: String
     let coverDiary: VideoDiary
 }
@@ -307,48 +324,127 @@ private struct GalleryAlbumItem: View {
     let title: String
     let coverDiary: VideoDiary
     let size: CGFloat
+    let isSelected: Bool
+    let isDimmed: Bool
+    let selectedPointerOffsetY: CGFloat
+    let action: () -> Void
 
     private var coverSize: CGFloat {
         size * (64 / 70)
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                Circle()
-                    .fill(.ultraThinMaterial)
-                    .overlay(
+        Button(action: action) {
+            ZStack(alignment: .top) {
+                VStack(spacing: 0) {
+                    ZStack {
                         Circle()
-                            .fill(Color.white.opacity(0.46))
-                            .blendMode(.plusLighter)
-                    )
-                    .shadow(color: .black.opacity(0.08), radius: 28, y: 10)
+                            .fill(.ultraThinMaterial)
+                            .overlay(
+                                Circle()
+                                    .fill(Color.white.opacity(0.46))
+                                    .blendMode(.plusLighter)
+                            )
+                            .shadow(color: .black.opacity(0.08), radius: 28, y: 10)
 
-                GalleryThumbnailView(
-                    url: coverDiary.videoURL,
-                    fallbackTint: coverDiary.fallbackTint,
-                    targetSize: CGSize(width: coverSize * 2, height: coverSize * 2)
-                )
-                .frame(width: coverSize, height: coverSize)
-                .clipShape(Circle())
+                        GalleryThumbnailView(
+                            url: coverDiary.videoURL,
+                            fallbackTint: coverDiary.fallbackTint,
+                            targetSize: CGSize(width: coverSize * 2, height: coverSize * 2)
+                        )
+                        .frame(width: coverSize, height: coverSize)
+                        .saturation(isDimmed ? 0.05 : 1)
+                        .opacity(isDimmed ? 0.56 : 1)
+                        .blur(radius: isDimmed ? size * (0.5 / 70) : 0)
+                        .clipShape(Circle())
+
+                        if isDimmed {
+                            Circle()
+                                .fill(Color.white.opacity(0.34))
+                                .frame(width: coverSize, height: coverSize)
+                        }
+
+                        if isSelected {
+                            Circle()
+                                .stroke(Color(red: 0.36, green: 0.62, blue: 1).opacity(0.95), lineWidth: max(1.5, size * (2 / 70)))
+                                .frame(width: size, height: size)
+                        }
+                    }
+                    .frame(width: size, height: size)
+
+                    Text(title)
+                        .font(.system(size: size * (14 / 70), weight: .regular))
+                        .tracking(size * (0.14 / 70))
+                        .foregroundStyle(isDimmed ? Color(white: 0.53) : Color(white: 0.24))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(width: size * (67 / 70), height: size * (22 / 70), alignment: .top)
+                        .frame(width: size, height: size * (22 / 70), alignment: .top)
+                        .offset(y: size * (2.0 / 70))
+                }
+                .frame(width: size, height: size * (92 / 70), alignment: .top)
+
+                if isSelected {
+                    GallerySelectedAlbumPointer()
+                        .fill(Color(red: 0.996, green: 0.996, blue: 0.996))
+                        .frame(width: size * (30 / 70), height: size * (26 / 70))
+                        .mask(alignment: .top) {
+                            Rectangle()
+                                .frame(width: size * (30 / 70), height: size * (14 / 70))
+                        }
+                        .offset(y: size * (104 / 70) + selectedPointerOffsetY)
+                }
             }
-            .frame(width: size, height: size)
-
-            Text(title)
-                .font(.system(size: size * (14 / 70), weight: .regular))
-                .tracking(size * (0.14 / 70))
-                .foregroundStyle(Color(white: 0.24))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(width: size * (67 / 70), height: size * (22 / 70), alignment: .top)
-                .frame(width: size, height: size * (22 / 70), alignment: .top)
-                .offset(y: size * (2.5 / 70))
+            .frame(width: size, height: size * (118 / 70), alignment: .top)
         }
-        .frame(width: size, height: size * (92 / 70), alignment: .top)
+        .buttonStyle(.plain)
     }
 }
 
-private struct GalleryAddAlbumComposer: View {
+private struct GallerySelectedAlbumPointer: Shape {
+    func path(in rect: CGRect) -> Path {
+        let scaleX = rect.width / 30
+        let scaleY = rect.height / 26
+        let shapeTop: CGFloat = 26 * 0.0781
+
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(
+                x: rect.minX + x * scaleX,
+                y: rect.minY + (shapeTop + y) * scaleY
+            )
+        }
+
+        var path = Path()
+
+        path.move(to: point(8.65168, 9.95343))
+        path.addLine(to: point(13.7635, 1.00772))
+        path.addCurve(
+            to: point(17.2365, 1.00772),
+            control1: point(14.5313, -0.335907),
+            control2: point(16.4687, -0.335907)
+        )
+        path.addLine(to: point(22.3483, 9.95343))
+        path.addCurve(
+            to: point(25.8213, 11.9689),
+            control1: point(23.0605, 11.1997),
+            control2: point(24.3859, 11.9689)
+        )
+        path.addLine(to: point(30, 11.9689))
+        path.addLine(to: point(30, 23.9689))
+        path.addLine(to: point(0, 23.9689))
+        path.addLine(to: point(0, 11.9689))
+        path.addLine(to: point(5.17871, 11.9689))
+        path.addCurve(
+            to: point(8.65168, 9.95343),
+            control1: point(6.61414, 11.9689),
+            control2: point(7.93951, 11.1997)
+        )
+        path.closeSubpath()
+        return path
+    }
+}
+
+struct GalleryAddAlbumComposer: View {
     @Binding var name: String
     let xScale: CGFloat
     let yScale: CGFloat
@@ -361,7 +457,7 @@ private struct GalleryAddAlbumComposer: View {
         let closeSize = 40 * xScale
         let saveWidth = 71 * xScale
         let saveHeight = 40 * xScale
-        let coverSize = 192 * xScale
+        let coverSize = 200 * xScale
         let inputWidth = 310 * xScale
         let inputHeight = 50 * xScale
 
@@ -373,8 +469,8 @@ private struct GalleryAddAlbumComposer: View {
                         .fill(Color(red: 0.966, green: 0.964, blue: 0.982).opacity(0.72))
                         .blendMode(.plusLighter)
                 )
-                .frame(width: cardWidth, height: cardHeight - 4 * yScale)
-                .offset(y: 4 * yScale)
+                .frame(width: cardWidth, height: cardHeight - 10 * yScale)
+                .offset(y: 8 * yScale)
                 .shadow(color: .black.opacity(0.08), radius: 36 * xScale, y: 13 * yScale)
 
             GalleryGlassCircleActionButton(
@@ -383,14 +479,14 @@ private struct GalleryAddAlbumComposer: View {
                 symbolSize: 17 * xScale,
                 action: onClose
             )
-            .position(x: 35 * xScale, y: 39 * yScale)
+            .position(x: 35 * xScale, y: 43 * yScale)
 
             Text("New Album")
                 .font(.system(size: 20 * xScale, weight: .medium))
                 .tracking(0.2 * xScale)
                 .foregroundStyle(.black)
                 .frame(width: cardWidth, height: 24 * yScale)
-                .position(x: cardWidth / 2, y: 37 * yScale)
+                .position(x: cardWidth / 2, y: 41 * yScale)
 
             GalleryGlassPillActionButton(
                 title: "Save",
@@ -399,7 +495,7 @@ private struct GalleryAddAlbumComposer: View {
                 isEnabled: true,
                 action: onNext
             )
-            .position(x: 329.5 * xScale, y: 39 * yScale)
+            .position(x: 329.5 * xScale, y: 43 * yScale)
 
             Button(action: {}) {
                 ZStack {
@@ -416,7 +512,7 @@ private struct GalleryAddAlbumComposer: View {
                 .frame(width: coverSize, height: coverSize)
             }
             .buttonStyle(.plain)
-            .position(x: (94 + 96) * xScale, y: (97 + 96 + 4) * yScale)
+            .position(x: (90 + 100) * xScale, y: (103 + 100) * yScale)
 
             ZStack(alignment: .leading) {
                 Capsule()
@@ -440,13 +536,13 @@ private struct GalleryAddAlbumComposer: View {
                 .offset(y: -0.5 * yScale)
             }
             .frame(width: inputWidth, height: inputHeight)
-            .position(x: (35 + 155) * xScale, y: (337 + 25 + 4) * yScale)
+            .position(x: (35 + 155) * xScale, y: (337 + 25 + 1) * yScale)
         }
         .frame(width: cardWidth, height: cardHeight, alignment: .topLeading)
     }
 }
 
-private struct GalleryAlbumVideoPicker: View {
+struct GalleryAlbumVideoPicker: View {
     let diaries: [VideoDiary]
     let albumName: String
     @Binding var selectedDiaryIDs: [VideoDiary.ID]
@@ -588,7 +684,7 @@ private struct GallerySelectionOverlay: View {
     }
 }
 
-private struct GalleryVideoCard: View {
+struct GalleryVideoCard: View {
     let diary: VideoDiary
     let width: CGFloat
     let height: CGFloat
@@ -658,6 +754,29 @@ private struct GalleryVideoCard: View {
             startPoint: .top,
             endPoint: .bottom
         )
+    }
+}
+
+struct GalleryAlbumAddVideoCard: View {
+    let width: CGFloat
+    let height: CGFloat
+    let column: Int
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            ZStack {
+                Color(red: 0.85, green: 0.85, blue: 0.85)
+
+                Image(systemName: "plus")
+                    .font(.system(size: width * (34 / 138), weight: .medium))
+                    .foregroundStyle(Color.black.opacity(0.30))
+            }
+            .frame(width: width, height: height)
+            .clipShape(GalleryCardShape(column: column, radius: width * (3 / 138)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -751,31 +870,60 @@ private actor GalleryThumbnailLoader {
         }
 
         let image = await Task.detached(priority: .utility) { () -> UIImage? in
+            guard !url.isFileURL || FileManager.default.isReadableFile(atPath: url.path) else {
+                return nil
+            }
+
             let asset = AVURLAsset(url: url)
             let duration = (try? await asset.load(.duration)) ?? .zero
             let durationSeconds = CMTimeGetSeconds(duration)
-            let seconds = durationSeconds.isFinite ? max(0, durationSeconds / 2) : 0
+            let candidateSeconds = Self.thumbnailCandidateSeconds(durationSeconds: durationSeconds)
             let generator = AVAssetImageGenerator(asset: asset)
             generator.appliesPreferredTrackTransform = true
+            generator.requestedTimeToleranceBefore = .positiveInfinity
+            generator.requestedTimeToleranceAfter = .positiveInfinity
             generator.maximumSize = CGSize(
                 width: max(320, targetSize.width),
                 height: max(320, targetSize.height)
             )
 
-            guard let cgImage = try? generator.copyCGImage(
-                at: CMTime(seconds: seconds, preferredTimescale: 600),
-                actualTime: nil
-            ) else {
-                return nil
+            for seconds in candidateSeconds {
+                if let cgImage = try? generator.copyCGImage(
+                    at: CMTime(seconds: seconds, preferredTimescale: 600),
+                    actualTime: nil
+                ) {
+                    return UIImage(cgImage: cgImage)
+                }
             }
 
-            return UIImage(cgImage: cgImage)
+            return nil
         }.value
 
         if let image {
             cache[url] = image
         }
         return image
+    }
+
+    private nonisolated static func thumbnailCandidateSeconds(durationSeconds: Double) -> [Double] {
+        guard durationSeconds.isFinite, durationSeconds > 0 else {
+            return [0]
+        }
+
+        let upperBound = max(0, durationSeconds - 0.05)
+        let candidates = [
+            durationSeconds / 2,
+            min(0.8, upperBound),
+            0,
+            durationSeconds / 3,
+            min(durationSeconds * 0.08, upperBound)
+        ]
+
+        return candidates.reduce(into: [Double]()) { result, seconds in
+            let clamped = min(max(0, seconds), upperBound)
+            guard !result.contains(where: { abs($0 - clamped) < 0.01 }) else { return }
+            result.append(clamped)
+        }
     }
 }
 
