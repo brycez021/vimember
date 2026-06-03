@@ -17,12 +17,14 @@ struct HomeView: View {
     @State private var selectedAlbumID: VideoAlbum.ID?
     @State private var editingAlbumID: VideoAlbum.ID?
     @State private var isAddAlbumComposerPresented = false
+    @State private var isAddAlbumComposerContentVisible = false
     @State private var isAlbumVideoPickerPresented = false
     @State private var draftAlbumName = ""
     @State private var selectedAlbumDiaryIDs: [VideoDiary.ID] = []
     @State private var isAlbumHeaderHidden = false
     @State private var lastHomeScrollOffset: CGFloat?
     @State private var homeScrollAnchorY: CGFloat?
+    @State private var addAlbumButtonFrame: CGRect?
 
     private var diaries: [VideoDiary] {
         records.map(\.diary) + VideoDiary.samples.compactMap { diary in
@@ -50,6 +52,23 @@ struct HomeView: View {
             let bottomControlsBottomMargin: CGFloat = 27 * yScale
             let screenEdgeFadeHeight: CGFloat = 250 * yScale
             let albumTop: CGFloat = 121 * yScale
+            let albumHeaderOffsetY: CGFloat = isAlbumHeaderHidden ? -226 * yScale : 0
+            let addAlbumFallbackCenter = CGPoint(
+                x: 55 * xScale,
+                y: albumHeaderOffsetY + 134 * yScale + 35 * xScale
+            )
+            let addAlbumShellFrame = CGRect(
+                x: 20 * xScale,
+                y: albumTop,
+                width: 380 * xScale,
+                height: 416 * yScale
+            )
+            let addAlbumContentFrame = CGRect(
+                x: 20 * xScale,
+                y: albumTop - 8 * yScale,
+                width: 380 * xScale,
+                height: 426 * yScale
+            )
             let videoGridTop: CGFloat = 280 * yScale
             let gridGap: CGFloat = 3 * xScale
             let galleryCardWidth = (screenWidth - gridGap * 2) / 3
@@ -263,31 +282,25 @@ struct HomeView: View {
                     )
                     .zIndex(2)
 
-                if isAddAlbumComposerPresented {
-                    GalleryAddAlbumComposer(
-                        name: $draftAlbumName,
-                        xScale: xScale,
-                        yScale: yScale,
-                        onClose: {
-                            closeAddAlbumFlow()
-                        },
-                        onNext: {
-                            showAlbumVideoPicker()
-                        }
-                    )
-                    .frame(width: 380 * xScale, height: 426 * yScale)
-                    .position(
-                        x: 20 * xScale + 190 * xScale,
-                        y: albumTop - 8 * yScale + 213 * yScale
-                    )
-                    .transition(
-                        .asymmetric(
-                            insertion: .scale(scale: 0.18, anchor: .topLeading).combined(with: .opacity),
-                            removal: .opacity
-                        )
-                    )
-                    .zIndex(3)
-                }
+                GalleryAlbumAddMorphOverlay(
+                    name: $draftAlbumName,
+                    isExpanded: isAddAlbumComposerPresented,
+                    contentOpacity: isAddAlbumComposerContentVisible ? 1 : 0,
+                    collapsedFrame: addAlbumButtonFrame,
+                    fallbackCollapsedCenter: addAlbumFallbackCenter,
+                    expandedShellFrame: addAlbumShellFrame,
+                    expandedContentFrame: addAlbumContentFrame,
+                    xScale: xScale,
+                    yScale: yScale,
+                    onClose: {
+                        closeAddAlbumFlow()
+                    },
+                    onNext: {
+                        showAlbumVideoPicker()
+                    }
+                )
+                .frame(width: screenWidth, height: screenHeight, alignment: .topLeading)
+                .zIndex(3)
 
                 if isAlbumVideoPickerPresented {
                     GalleryAlbumVideoPicker(
@@ -298,9 +311,12 @@ struct HomeView: View {
                             withAnimation(.snappy(duration: 0.28)) {
                                 isAlbumVideoPickerPresented = false
                                 isAddAlbumComposerPresented = editingAlbumID == nil
+                                isAddAlbumComposerContentVisible = false
                             }
                             if editingAlbumID != nil {
                                 closeAddAlbumFlow()
+                            } else {
+                                revealAddAlbumComposerContent()
                             }
                         },
                         onSave: {
@@ -317,6 +333,10 @@ struct HomeView: View {
                         updateAlbumHeaderVisibility(dragTranslation: value.translation)
                     }
             )
+            .coordinateSpace(name: GalleryAddAlbumMorphCoordinateSpace.name)
+            .onPreferenceChange(GalleryAddAlbumFramePreferenceKey.self) { frame in
+                addAlbumButtonFrame = frame
+            }
             .ignoresSafeArea()
             .animation(.snappy(duration: 0.24), value: isGalleryMode)
             .animation(.snappy(duration: 0.32), value: isAddAlbumComposerPresented)
@@ -504,15 +524,18 @@ struct HomeView: View {
         selectedAlbumDiaryIDs = []
         editingAlbumID = nil
         withAnimation(.snappy(duration: 0.32)) {
+            isAddAlbumComposerContentVisible = false
             isAlbumHeaderHidden = false
             isAddAlbumComposerPresented = true
             isAlbumVideoPickerPresented = false
         }
+        revealAddAlbumComposerContent()
     }
 
     @MainActor
     private func showAlbumVideoPicker() {
         withAnimation(.snappy(duration: 0.28)) {
+            isAddAlbumComposerContentVisible = false
             isAddAlbumComposerPresented = false
             isAlbumVideoPickerPresented = true
         }
@@ -524,6 +547,7 @@ struct HomeView: View {
         selectedAlbumDiaryIDs = album.diaryIDs
         editingAlbumID = album.id
         withAnimation(.snappy(duration: 0.28)) {
+            isAddAlbumComposerContentVisible = false
             isAlbumHeaderHidden = false
             isAddAlbumComposerPresented = false
             isAlbumVideoPickerPresented = true
@@ -536,6 +560,7 @@ struct HomeView: View {
         selectedAlbumDiaryIDs = [diary.id]
         editingAlbumID = nil
         withAnimation(.snappy(duration: 0.28)) {
+            isAddAlbumComposerContentVisible = false
             isAlbumHeaderHidden = false
             isAddAlbumComposerPresented = false
             isAlbumVideoPickerPresented = true
@@ -555,12 +580,24 @@ struct HomeView: View {
     @MainActor
     private func closeAddAlbumFlow() {
         withAnimation(.snappy(duration: 0.24)) {
+            isAddAlbumComposerContentVisible = false
             isAddAlbumComposerPresented = false
             isAlbumVideoPickerPresented = false
         }
         draftAlbumName = ""
         selectedAlbumDiaryIDs = []
         editingAlbumID = nil
+    }
+
+    @MainActor
+    private func revealAddAlbumComposerContent() {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 260_000_000)
+            guard isAddAlbumComposerPresented else { return }
+            withAnimation(.easeOut(duration: 0.12)) {
+                isAddAlbumComposerContentVisible = true
+            }
+        }
     }
 
     @MainActor

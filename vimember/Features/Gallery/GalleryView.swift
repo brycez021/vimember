@@ -9,9 +9,11 @@ struct GalleryView: View {
     let onCreateAlbum: (_ name: String, _ diaryIDs: [VideoDiary.ID]) -> Void
 
     @State private var isAddAlbumComposerPresented = false
+    @State private var isAddAlbumComposerContentVisible = false
     @State private var isAlbumVideoPickerPresented = false
     @State private var draftAlbumName = ""
     @State private var selectedAlbumDiaryIDs: [VideoDiary.ID] = []
+    @State private var addAlbumButtonFrame: CGRect?
 
     var body: some View {
         GeometryReader { _ in
@@ -25,6 +27,19 @@ struct GalleryView: View {
             let cardHeight = cardWidth * (184 / 138)
             let albumTop = 121 * yScale
             let videoGridTop = 280 * yScale
+            let addAlbumFallbackCenter = CGPoint(x: 55 * xScale, y: albumTop + 35 * xScale)
+            let addAlbumShellFrame = CGRect(
+                x: 20 * xScale,
+                y: albumTop,
+                width: 380 * xScale,
+                height: 416 * yScale
+            )
+            let addAlbumContentFrame = CGRect(
+                x: 20 * xScale,
+                y: albumTop - 8 * yScale,
+                width: 380 * xScale,
+                height: 426 * yScale
+            )
             let rowCount = max(1, Int(ceil(Double(diaries.count) / 3.0)))
             let contentHeight = max(
                 screenHeight + 1,
@@ -93,28 +108,25 @@ struct GalleryView: View {
                     )
                     .allowsHitTesting(false)
 
-                if isAddAlbumComposerPresented {
-                    GalleryAddAlbumComposer(
-                        name: $draftAlbumName,
-                        xScale: xScale,
-                        yScale: yScale,
-                        onClose: {
-                            closeAddAlbumFlow()
-                        },
-                        onNext: {
-                            showAlbumVideoPicker()
-                        }
-                    )
-                    .frame(width: 380 * xScale, height: 422 * yScale)
-                    .offset(x: 20 * xScale, y: albumTop - 8 * yScale)
-                    .transition(
-                        .asymmetric(
-                            insertion: .scale(scale: 0.18, anchor: .topLeading).combined(with: .opacity),
-                            removal: .opacity
-                        )
-                    )
-                    .zIndex(3)
-                }
+                GalleryAlbumAddMorphOverlay(
+                    name: $draftAlbumName,
+                    isExpanded: isAddAlbumComposerPresented,
+                    contentOpacity: isAddAlbumComposerContentVisible ? 1 : 0,
+                    collapsedFrame: addAlbumButtonFrame,
+                    fallbackCollapsedCenter: addAlbumFallbackCenter,
+                    expandedShellFrame: addAlbumShellFrame,
+                    expandedContentFrame: addAlbumContentFrame,
+                    xScale: xScale,
+                    yScale: yScale,
+                    onClose: {
+                        closeAddAlbumFlow()
+                    },
+                    onNext: {
+                        showAlbumVideoPicker()
+                    }
+                )
+                .frame(width: screenWidth, height: screenHeight, alignment: .topLeading)
+                .zIndex(3)
 
                 if isAlbumVideoPickerPresented {
                     GalleryAlbumVideoPicker(
@@ -125,7 +137,9 @@ struct GalleryView: View {
                             withAnimation(.snappy(duration: 0.28)) {
                                 isAlbumVideoPickerPresented = false
                                 isAddAlbumComposerPresented = true
+                                isAddAlbumComposerContentVisible = false
                             }
+                            revealAddAlbumComposerContent()
                         },
                         onSave: {
                             saveAlbum()
@@ -136,6 +150,10 @@ struct GalleryView: View {
                 }
             }
             .frame(width: screenWidth, height: screenHeight)
+            .coordinateSpace(name: GalleryAddAlbumMorphCoordinateSpace.name)
+            .onPreferenceChange(GalleryAddAlbumFramePreferenceKey.self) { frame in
+                addAlbumButtonFrame = frame
+            }
             .ignoresSafeArea()
         }
         .ignoresSafeArea()
@@ -147,13 +165,16 @@ struct GalleryView: View {
         draftAlbumName = ""
         selectedAlbumDiaryIDs = []
         withAnimation(.snappy(duration: 0.32)) {
+            isAddAlbumComposerContentVisible = false
             isAddAlbumComposerPresented = true
             isAlbumVideoPickerPresented = false
         }
+        revealAddAlbumComposerContent()
     }
 
     private func showAlbumVideoPicker() {
         withAnimation(.snappy(duration: 0.28)) {
+            isAddAlbumComposerContentVisible = false
             isAddAlbumComposerPresented = false
             isAlbumVideoPickerPresented = true
         }
@@ -161,11 +182,22 @@ struct GalleryView: View {
 
     private func closeAddAlbumFlow() {
         withAnimation(.snappy(duration: 0.24)) {
+            isAddAlbumComposerContentVisible = false
             isAddAlbumComposerPresented = false
             isAlbumVideoPickerPresented = false
         }
         draftAlbumName = ""
         selectedAlbumDiaryIDs = []
+    }
+
+    private func revealAddAlbumComposerContent() {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 260_000_000)
+            guard isAddAlbumComposerPresented else { return }
+            withAnimation(.easeOut(duration: 0.12)) {
+                isAddAlbumComposerContentVisible = true
+            }
+        }
     }
 
     private func saveAlbum() {
@@ -253,7 +285,10 @@ struct GalleryAlbumStrip: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .top, spacing: 17 * xScale) {
-                GalleryAddAlbumPlaceholder(size: 70 * xScale, action: onAddAlbum)
+                GalleryAddAlbumPlaceholder(
+                    size: 70 * xScale,
+                    action: onAddAlbum
+                )
 
                 ForEach(albumItems) { item in
                     let isSelected = item.albumID == selectedAlbumID
@@ -300,23 +335,53 @@ private struct GalleryAddAlbumPlaceholder: View {
 
     var body: some View {
         Button(action: action) {
-            ZStack {
-                Circle()
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        Circle()
-                            .fill(Color.white.opacity(0.58))
-                            .blendMode(.plusLighter)
-                    )
-                    .shadow(color: .black.opacity(0.08), radius: 28, y: 10)
-
-                Image(systemName: "plus")
-                    .font(.system(size: size * 0.28, weight: .semibold))
-                    .foregroundStyle(Color.black.opacity(0.28))
-            }
-            .frame(width: size, height: size)
+            Color.clear
+                .frame(width: size, height: size)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Add Album")
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: GalleryAddAlbumFramePreferenceKey.self,
+                    value: proxy.frame(in: .named(GalleryAddAlbumMorphCoordinateSpace.name))
+                )
+            }
+        }
+    }
+}
+
+enum GalleryAddAlbumMorphCoordinateSpace {
+    static let name = "gallery-add-album-morph-space"
+}
+
+struct GalleryAddAlbumFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect?
+
+    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) {
+        value = nextValue() ?? value
+    }
+}
+
+struct MorphingAlbumCardShell: View {
+    let width: CGFloat
+    let height: CGFloat
+    let cornerRadius: CGFloat
+    let overlayColor: Color
+    let shadowRadius: CGFloat
+    let shadowYOffset: CGFloat
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(.ultraThinMaterial)
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(overlayColor)
+                    .blendMode(.plusLighter)
+            )
+            .frame(width: width, height: height)
+            .shadow(color: .black.opacity(0.08), radius: shadowRadius, y: shadowYOffset)
     }
 }
 
@@ -444,7 +509,95 @@ private struct GallerySelectedAlbumPointer: Shape {
     }
 }
 
-struct GalleryAddAlbumComposer: View {
+struct GalleryAlbumAddMorphOverlay: View {
+    @Binding var name: String
+    let isExpanded: Bool
+    let contentOpacity: Double
+    let collapsedFrame: CGRect?
+    let fallbackCollapsedCenter: CGPoint
+    let expandedShellFrame: CGRect
+    let expandedContentFrame: CGRect
+    let xScale: CGFloat
+    let yScale: CGFloat
+    let onClose: () -> Void
+    let onNext: () -> Void
+
+    private var collapsedCenter: CGPoint {
+        guard let collapsedFrame else {
+            return fallbackCollapsedCenter
+        }
+
+        return CGPoint(x: collapsedFrame.midX, y: collapsedFrame.midY)
+    }
+
+    private var shellCenter: CGPoint {
+        isExpanded
+            ? CGPoint(x: expandedShellFrame.midX, y: expandedShellFrame.midY)
+            : collapsedCenter
+    }
+
+    private var shellWidth: CGFloat {
+        isExpanded ? expandedShellFrame.width : 56 * xScale
+    }
+
+    private var shellHeight: CGFloat {
+        isExpanded ? expandedShellFrame.height : 56 * xScale
+    }
+
+    private var shellCornerRadius: CGFloat {
+        isExpanded ? 24 * xScale : 28 * xScale
+    }
+
+    private var shellOverlayColor: Color {
+        isExpanded
+            ? Color(red: 0.966, green: 0.964, blue: 0.982).opacity(0.72)
+            : .white.opacity(0.58)
+    }
+
+    private var shellShadowRadius: CGFloat {
+        isExpanded ? 36 * xScale : 28 * xScale
+    }
+
+    private var shellShadowYOffset: CGFloat {
+        isExpanded ? 13 * yScale : 10 * xScale
+    }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            MorphingAlbumCardShell(
+                width: shellWidth,
+                height: shellHeight,
+                cornerRadius: shellCornerRadius,
+                overlayColor: shellOverlayColor,
+                shadowRadius: shellShadowRadius,
+                shadowYOffset: shellShadowYOffset
+            )
+            .position(shellCenter)
+            .allowsHitTesting(false)
+
+            Image(systemName: "plus")
+                .font(.system(size: 16 * xScale, weight: .semibold))
+                .foregroundStyle(Color.black.opacity(0.28))
+                .position(collapsedCenter)
+                .opacity(isExpanded ? 0 : 1)
+                .allowsHitTesting(false)
+
+            GalleryAddAlbumComposerContent(
+                name: $name,
+                xScale: xScale,
+                yScale: yScale,
+                onClose: onClose,
+                onNext: onNext
+            )
+            .frame(width: expandedContentFrame.width, height: expandedContentFrame.height, alignment: .topLeading)
+            .position(x: expandedContentFrame.midX, y: expandedContentFrame.midY)
+            .opacity(contentOpacity)
+            .allowsHitTesting(isExpanded && contentOpacity > 0.5)
+        }
+    }
+}
+
+struct GalleryAddAlbumComposerContent: View {
     @Binding var name: String
     let xScale: CGFloat
     let yScale: CGFloat
@@ -462,17 +615,6 @@ struct GalleryAddAlbumComposer: View {
         let inputHeight = 50 * xScale
 
         ZStack(alignment: .topLeading) {
-            RoundedRectangle(cornerRadius: 27 * xScale, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 27 * xScale, style: .continuous)
-                        .fill(Color(red: 0.966, green: 0.964, blue: 0.982).opacity(0.72))
-                        .blendMode(.plusLighter)
-                )
-                .frame(width: cardWidth, height: cardHeight - 10 * yScale)
-                .offset(y: 8 * yScale)
-                .shadow(color: .black.opacity(0.08), radius: 36 * xScale, y: 13 * yScale)
-
             GalleryGlassCircleActionButton(
                 systemName: "xmark",
                 size: closeSize,
@@ -540,6 +682,70 @@ struct GalleryAddAlbumComposer: View {
         }
         .frame(width: cardWidth, height: cardHeight, alignment: .topLeading)
     }
+}
+
+private struct GalleryAlbumAddMorphTransitionDemo: View {
+    @State private var isExpanded = false
+    @State private var contentVisible = false
+
+    var body: some View {
+        let collapsedCenter = CGPoint(x: 54, y: 156)
+        let expandedShellFrame = CGRect(x: 20, y: 121, width: 380, height: 416)
+        let shellWidth = isExpanded ? expandedShellFrame.width : 56
+        let shellHeight = isExpanded ? expandedShellFrame.height : 56
+        let shellCornerRadius: CGFloat = isExpanded ? 24 : 28
+        let shellCenter = isExpanded
+            ? CGPoint(x: expandedShellFrame.midX, y: expandedShellFrame.midY)
+            : collapsedCenter
+
+        ZStack(alignment: .topLeading) {
+            Color.white.ignoresSafeArea()
+
+            MorphingAlbumCardShell(
+                width: shellWidth,
+                height: shellHeight,
+                cornerRadius: shellCornerRadius,
+                overlayColor: isExpanded
+                    ? Color(red: 0.966, green: 0.964, blue: 0.982).opacity(0.72)
+                    : .white.opacity(0.58),
+                shadowRadius: isExpanded ? 36 : 28,
+                shadowYOffset: isExpanded ? 13 : 10
+            )
+            .position(shellCenter)
+
+            Image(systemName: "plus")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Color.black.opacity(0.28))
+                .position(collapsedCenter)
+                .opacity(isExpanded ? 0 : 1)
+
+            Text("New Album")
+                .font(.system(size: 20, weight: .medium))
+                .frame(width: 380, height: 24)
+                .position(x: 210, y: 154)
+                .opacity(contentVisible ? 1 : 0)
+
+            Button(isExpanded ? "Collapse" : "Expand") {
+                withAnimation(.snappy(duration: 1.1)) {
+                    contentVisible = false
+                    isExpanded.toggle()
+                }
+
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 770_000_000)
+                    guard isExpanded else { return }
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        contentVisible = true
+                    }
+                }
+            }
+            .position(x: 210, y: 590)
+        }
+    }
+}
+
+#Preview("Album Add Card Morph Demo") {
+    GalleryAlbumAddMorphTransitionDemo()
 }
 
 struct GalleryAlbumVideoPicker: View {
