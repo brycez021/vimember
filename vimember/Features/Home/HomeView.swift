@@ -9,10 +9,12 @@ struct HomeView: View {
     @State private var activeDiaryID: VideoDiary.ID?
     @State private var pendingVisibilityTask: Task<Void, Never>?
     @State private var isSwitcherPresented = false
+    @State private var isGalleryPresented = false
     @State private var isImportPresented = false
     @State private var selectedDiary: VideoDiary?
     @State private var hiddenSampleIDs: Set<VideoDiary.ID> = []
     @State private var sampleOverrides: [VideoDiary.ID: VideoDiary] = [:]
+    @State private var albums: [VideoAlbum] = []
 
     private var diaries: [VideoDiary] {
         records.map(\.diary) + VideoDiary.samples.compactMap { diary in
@@ -46,80 +48,101 @@ struct HomeView: View {
             ZStack(alignment: .topTrailing) {
                 Color.white.ignoresSafeArea()
 
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: 2) {
-                        ForEach(diaries) { diary in
-                            VideoDiaryCard(
-                                diary: diary,
-                                width: cardWidth,
-                                isActive: activeDiaryID == diary.id
-                            )
-                            .id(diary.id)
-                            .background(VisibilityReporter(id: diary.id))
-                            .onTapGesture {
-                                activeDiaryID = nil
-                                selectedDiary = diary
+                if isGalleryPresented {
+                    GalleryView(
+                        diaries: diaries,
+                        albums: albums,
+                        onSelectDiary: { diary in
+                            selectedDiary = diary
+                        },
+                        onCreateAlbum: { name, diaryIDs in
+                            createAlbum(name: name, diaryIDs: diaryIDs)
+                        }
+                    )
+                    .transition(.opacity)
+                } else {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        LazyVStack(spacing: 2) {
+                            ForEach(diaries) { diary in
+                                VideoDiaryCard(
+                                    diary: diary,
+                                    width: cardWidth,
+                                    isActive: activeDiaryID == diary.id
+                                )
+                                .id(diary.id)
+                                .background(VisibilityReporter(id: diary.id))
+                                .onTapGesture {
+                                    activeDiaryID = nil
+                                    selectedDiary = diary
+                                }
                             }
                         }
+                        .frame(maxWidth: .infinity)
+                        .padding(.bottom, 28)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.bottom, 28)
-                }
-                .coordinateSpace(name: "home-scroll")
-                .onPreferenceChange(CardVisibilityPreferenceKey.self) { frames in
-                    scheduleActiveCardUpdate(frames: frames, viewport: viewport)
-                }
-
-                HomeScreenEdgeFadeOverlay(
-                    backgroundColor: .white,
-                    width: screenWidth,
-                    height: screenEdgeFadeHeight,
-                    edge: .top
-                )
-                .position(x: screenWidth / 2, y: screenEdgeFadeHeight / 2)
-                .allowsHitTesting(false)
-
-                HomeScreenEdgeFadeOverlay(
-                    backgroundColor: .white,
-                    width: screenWidth,
-                    height: screenEdgeFadeHeight,
-                    edge: .bottom
-                )
-                .position(x: screenWidth / 2, y: screenHeight - screenEdgeFadeHeight / 2)
-                .allowsHitTesting(false)
-
-                HomeTopButton(isPresented: $isSwitcherPresented, size: topButtonSize)
-                    .position(
-                        x: topButtonRight - topButtonSize / 2,
-                        y: topButtonTop + topButtonSize / 2
-                    )
-
-                HomeBottomControls(
-                    searchWidth: bottomSearchWidth,
-                    height: bottomControlsHeight,
-                    addButtonSize: bottomAddButtonSize,
-                    gap: bottomControlsGap,
-                    addAction: {
-                        isImportPresented = true
+                    .coordinateSpace(name: "home-scroll")
+                    .onPreferenceChange(CardVisibilityPreferenceKey.self) { frames in
+                        scheduleActiveCardUpdate(frames: frames, viewport: viewport)
                     }
-                )
-                    .position(
-                        x: screenWidth / 2,
-                        y: screenHeight - bottomControlsBottomMargin - bottomControlsHeight / 2
-                    )
 
-                if isSwitcherPresented {
-                    HomeSwitchPanel()
+                    HomeScreenEdgeFadeOverlay(
+                        backgroundColor: .white,
+                        width: screenWidth,
+                        height: screenEdgeFadeHeight,
+                        edge: .top
+                    )
+                    .position(x: screenWidth / 2, y: screenEdgeFadeHeight / 2)
+                    .allowsHitTesting(false)
+
+                    HomeScreenEdgeFadeOverlay(
+                        backgroundColor: .white,
+                        width: screenWidth,
+                        height: screenEdgeFadeHeight,
+                        edge: .bottom
+                    )
+                    .position(x: screenWidth / 2, y: screenHeight - screenEdgeFadeHeight / 2)
+                    .allowsHitTesting(false)
+
+                    HomeTopButton(isPresented: $isSwitcherPresented, size: topButtonSize)
                         .position(
-                            x: topButtonRight - 125,
-                            y: topButtonTop + topButtonSize + 51
+                            x: topButtonRight - topButtonSize / 2,
+                            y: topButtonTop + topButtonSize / 2
                         )
-                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
-                        .zIndex(2)
+
+                    HomeBottomControls(
+                        searchWidth: bottomSearchWidth,
+                        height: bottomControlsHeight,
+                        addButtonSize: bottomAddButtonSize,
+                        gap: bottomControlsGap,
+                        addAction: {
+                            isImportPresented = true
+                        }
+                    )
+                        .position(
+                            x: screenWidth / 2,
+                            y: screenHeight - bottomControlsBottomMargin - bottomControlsHeight / 2
+                        )
+
+                    if isSwitcherPresented {
+                        HomeSwitchPanel(
+                            onGallery: {
+                                isSwitcherPresented = false
+                                activeDiaryID = nil
+                                isGalleryPresented = true
+                            }
+                        )
+                            .position(
+                                x: topButtonRight - 125,
+                                y: topButtonTop + topButtonSize + 51
+                            )
+                            .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+                            .zIndex(2)
+                    }
                 }
             }
             .ignoresSafeArea()
             .animation(.snappy(duration: 0.22), value: isSwitcherPresented)
+            .animation(.snappy(duration: 0.24), value: isGalleryPresented)
             .onAppear {
                 activeDiaryID = diaries.first?.id
             }
@@ -182,6 +205,8 @@ struct HomeView: View {
             sampleOverrides[diary.id] = nil
         }
 
+        removeDiaryFromAlbums(diary.id)
+
         selectedDiary = nil
         if activeDiaryID == diary.id {
             activeDiaryID = diaries.first?.id
@@ -208,6 +233,47 @@ struct HomeView: View {
         sampleOverrides[diary.id] = updatedDiary
         selectedDiary = updatedDiary
         return updatedDiary
+    }
+
+    @MainActor
+    private func createAlbum(name: String, diaryIDs: [VideoDiary.ID]) {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalName = trimmedName.isEmpty ? "New Album" : trimmedName
+        let orderedIDs = diaryIDs.reduce(into: [VideoDiary.ID]()) { result, id in
+            guard !result.contains(id) else { return }
+            result.append(id)
+        }
+
+        guard let coverID = orderedIDs.first else {
+            return
+        }
+
+        albums.insert(
+            VideoAlbum(
+                name: finalName,
+                diaryIDs: orderedIDs,
+                coverDiaryID: coverID
+            ),
+            at: 0
+        )
+    }
+
+    @MainActor
+    private func removeDiaryFromAlbums(_ diaryID: VideoDiary.ID) {
+        albums = albums.compactMap { album in
+            var nextAlbum = album
+            nextAlbum.diaryIDs.removeAll { $0 == diaryID }
+
+            if nextAlbum.diaryIDs.isEmpty {
+                return nil
+            }
+
+            if nextAlbum.coverDiaryID == diaryID {
+                nextAlbum.coverDiaryID = nextAlbum.diaryIDs.first
+            }
+
+            return nextAlbum
+        }
     }
 }
 
@@ -670,10 +736,12 @@ private struct HomeBottomControls: View {
 }
 
 private struct HomeSwitchPanel: View {
+    let onGallery: () -> Void
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HomeSwitchAction(icon: "calendar", title: "Date")
-            HomeSwitchAction(icon: "square.grid.2x2", title: "Gallery")
+            HomeSwitchAction(icon: "square.grid.2x2", title: "Gallery", action: onGallery)
         }
         .padding(.vertical, 7.5)
         .frame(width: 250)
@@ -693,20 +761,28 @@ private struct HomeSwitchPanel: View {
 private struct HomeSwitchAction: View {
     let icon: String
     let title: String
+    var action: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon)
-                .font(.system(size: 17, weight: .regular))
-                .frame(width: 20)
+        Button {
+            action?()
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.system(size: 17, weight: .regular))
+                    .frame(width: 20)
 
-            Text(title)
-                .font(.system(size: 20, weight: .regular))
-                .lineLimit(1)
+                Text(title)
+                    .font(.system(size: 20, weight: .regular))
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(Color.black.opacity(0.90))
+            .frame(height: 42)
+            .padding(.horizontal, 26)
         }
-        .foregroundStyle(Color.black.opacity(0.90))
-        .frame(height: 42)
-        .padding(.horizontal, 26)
+        .buttonStyle(.plain)
     }
 }
 

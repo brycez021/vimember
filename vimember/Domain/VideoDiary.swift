@@ -116,6 +116,28 @@ struct VideoDiary: Identifiable, Equatable {
     }
 }
 
+struct VideoAlbum: Identifiable, Equatable {
+    let id: UUID
+    var name: String
+    var diaryIDs: [VideoDiary.ID]
+    var coverDiaryID: VideoDiary.ID?
+    var createdAt: Date
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        diaryIDs: [VideoDiary.ID],
+        coverDiaryID: VideoDiary.ID?,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.name = name
+        self.diaryIDs = diaryIDs
+        self.coverDiaryID = coverDiaryID
+        self.createdAt = createdAt
+    }
+}
+
 @Model
 final class VideoDiaryRecord {
     @Attribute(.unique) var id: UUID
