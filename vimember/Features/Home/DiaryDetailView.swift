@@ -593,25 +593,15 @@ private struct DetailGlassIconButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: max(18, size * 0.42), weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: size, height: size)
-                .background(
-                    Circle()
-                        .fill(.ultraThinMaterial)
-                        .overlay(
-                            Circle()
-                                .fill(Color.white.opacity(0.62))
-                                .blendMode(.plusLighter)
-                        )
-                        .shadow(color: .black.opacity(0.12), radius: 40, y: 8)
-                )
-                .opacity(isEnabled ? 1 : 0.42)
-        }
-        .disabled(!isEnabled)
-        .buttonStyle(.plain)
+        LiquidGlassIconButton(
+            systemName: systemName,
+            size: size,
+            symbolSize: max(18, size * 0.42),
+            symbolWeight: .semibold,
+            foregroundColor: .white,
+            isEnabled: isEnabled,
+            action: action
+        )
     }
 }
 
@@ -622,22 +612,13 @@ private struct DetailGlassPillButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: max(18, height * 0.40), weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: width, height: height)
-                .background(
-                    Capsule()
-                        .fill(.ultraThinMaterial)
-                        .overlay(
-                            Capsule()
-                                .fill(Color.white.opacity(0.62))
-                                .blendMode(.plusLighter)
-                        )
-                        .shadow(color: .black.opacity(0.12), radius: 40, y: 8)
-                )
-        }
-        .buttonStyle(.plain)
+        LiquidGlassPillButton(
+            width: width,
+            height: height,
+            systemName: systemName,
+            symbolSize: max(18, height * 0.40),
+            foregroundColor: .white,
+            action: action
+        )
     }
 }

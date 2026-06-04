@@ -81,6 +81,25 @@ struct HomeView: View {
                     diaries.first { $0.id == diaryID }
                 }
             } ?? selectedFallbackDiary.map { [$0] } ?? diaries
+            let viewModeSelection = Binding<ViewModeSelection>(
+                get: {
+                    isGalleryMode ? .gallery : .timeline
+                },
+                set: { nextSelection in
+                    switch nextSelection {
+                    case .timeline:
+                        isGalleryMode = false
+                        isAlbumHeaderHidden = false
+                        resetHomeScrollTracking()
+                        activeDiaryID = visibleDiaries.first?.id
+                    case .gallery:
+                        isGalleryMode = true
+                        isAlbumHeaderHidden = false
+                        resetHomeScrollTracking()
+                        activeDiaryID = nil
+                    }
+                }
+            )
             let galleryTitle = selectedAlbum?.name ?? selectedFallbackDiary.map { fallbackAlbumTitle(for: $0) } ?? "All Videos"
             let galleryItemCount = visibleDiaries.count + (isAlbumFilterActive ? 1 : 0)
             let galleryRowCount = max(1, Int(ceil(Double(galleryItemCount) / 3.0)))
@@ -217,22 +236,7 @@ struct HomeView: View {
                 .offset(y: isAlbumHeaderHidden ? -226 * yScale : 0)
                 .zIndex(2)
 
-                HomeViewModeToggle(
-                    isGalleryMode: isGalleryMode,
-                    xScale: xScale,
-                    onTimeline: {
-                        isGalleryMode = false
-                        isAlbumHeaderHidden = false
-                        resetHomeScrollTracking()
-                        activeDiaryID = visibleDiaries.first?.id
-                    },
-                    onGallery: {
-                        isGalleryMode = true
-                        isAlbumHeaderHidden = false
-                        resetHomeScrollTracking()
-                        activeDiaryID = nil
-                    }
-                )
+                ViewModeSwitch(selection: viewModeSelection, xScale: xScale)
                 .position(
                     x: screenWidth - 20 * xScale - 50 * xScale,
                     y: 68 * yScale + 22 * xScale
@@ -697,83 +701,316 @@ private struct HomeAlbumExitButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            ZStack {
-                Circle()
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        Circle()
-                            .fill(Color.white.opacity(0.65))
-                            .blendMode(.plusLighter)
-                    )
-                    .shadow(color: .black.opacity(0.12), radius: 40 * (size / 44), y: 8 * (size / 44))
-
-                Capsule()
-                    .fill(Color(white: 0.46))
-                    .frame(width: symbolSize, height: max(1.8, symbolSize * 0.14))
-                    .rotationEffect(.degrees(45))
-
-                Capsule()
-                    .fill(Color(white: 0.46))
-                    .frame(width: symbolSize, height: max(1.8, symbolSize * 0.14))
-                    .rotationEffect(.degrees(-45))
-            }
-            .frame(width: size, height: size)
-            .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
+        LiquidGlassIconButton(
+            systemName: "xmark",
+            size: size,
+            symbolSize: symbolSize,
+            symbolWeight: .semibold,
+            foregroundColor: Color.black.opacity(0.72),
+            action: action
+        )
     }
 }
 
-private struct HomeViewModeToggle: View {
-    let isGalleryMode: Bool
+private enum ViewModeSelection: Hashable {
+    case timeline
+    case gallery
+}
+
+private struct ViewModeSwitch: View {
+    @Binding var selection: ViewModeSelection
     let xScale: CGFloat
-    let onTimeline: () -> Void
-    let onGallery: () -> Void
+    @State private var bubbleMode: ViewModeSelection?
+    @State private var pressedMode: ViewModeSelection?
+    @State private var phase: ViewModeSwitchPhase = .idle
+    @State private var bubbleScale: CGFloat = 1
+    @State private var bubbleScaleX: CGFloat = 1
+    @State private var lobeScale: CGFloat = 0.001
+    @State private var travelDirection: CGFloat = 0
+    @State private var isAnimating = false
 
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Capsule()
-                        .fill(Color.white.opacity(0.65))
-                        .blendMode(.plusLighter)
-                )
-                .shadow(color: .black.opacity(0.12), radius: 40 * xScale, y: 8 * xScale)
-
-            modeButton(
-                systemName: "rectangle.portrait.fill",
-                isSelected: !isGalleryMode,
-                action: onTimeline
-            )
-            .frame(width: 40 * xScale, height: 38 * xScale)
-            .offset(x: 3 * xScale, y: 3 * xScale)
-
-            modeButton(
-                systemName: "square.grid.3x3.fill",
-                isSelected: isGalleryMode,
-                action: onGallery
-            )
-            .frame(width: 38 * xScale, height: 38 * xScale)
-            .offset(x: 59 * xScale, y: 3 * xScale)
-        }
-        .frame(width: 100 * xScale, height: 44 * xScale)
+    private var switchAnimation: Animation {
+        .spring(response: 0.35, dampingFraction: 0.78)
     }
 
-    private func modeButton(systemName: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 15 * xScale, weight: .semibold))
-                .foregroundStyle(Color.black.opacity(isSelected ? 0.88 : 0.40))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(
-                    Capsule()
-                        .fill(Color.white.opacity(isSelected ? 0.55 : 0.12))
-                        .blendMode(.plusLighter)
+    var body: some View {
+        let width = 100 * xScale
+        let height = 44 * xScale
+        let horizontalInset = 3 * xScale
+        let buttonWidth = (width - horizontalInset * 2) / 2
+        let indicatorWidth = 37 * xScale
+        let indicatorHeight = 35 * xScale
+        let visualSelection = bubbleMode ?? selection
+        let indicatorCenterX = horizontalInset
+            + buttonWidth * (visualSelection == .timeline ? 0.5 : 1.5)
+        let indicatorCenterY = height / 2 + (phase == .pressing ? -0.5 * xScale : 0)
+
+        ZStack(alignment: .topLeading) {
+            GlassEffectContainer(spacing: 0) {
+                ZStack(alignment: .topLeading) {
+                    LiquidGlassCapsuleSurface(width: width, height: height, xScale: xScale)
+
+                    LiquidSelectionBlob(
+                        width: indicatorWidth,
+                        height: indicatorHeight,
+                        xScale: xScale,
+                        lobeScale: lobeScale,
+                        travelDirection: travelDirection
+                    )
+                        .scaleEffect(x: bubbleScaleX, y: bubbleScale, anchor: .center)
+                        .position(x: indicatorCenterX, y: indicatorCenterY)
+                        .animation(switchAnimation, value: visualSelection)
+                        .animation(.spring(response: 0.20, dampingFraction: 0.72), value: phase)
+                        .animation(.spring(response: 0.28, dampingFraction: 0.66), value: bubbleScale)
+                        .animation(.spring(response: 0.32, dampingFraction: 0.72), value: bubbleScaleX)
+                        .animation(.spring(response: 0.26, dampingFraction: 0.68), value: lobeScale)
+                        .allowsHitTesting(false)
+                }
+                .frame(width: width, height: height)
+            }
+            .allowsHitTesting(false)
+
+            HStack(spacing: 0) {
+                modeButton(
+                    systemName: "rectangle.portrait.fill",
+                    mode: .timeline,
+                    visualSelection: visualSelection
                 )
+                .frame(width: buttonWidth, height: height)
+
+                modeButton(
+                    systemName: "square.grid.3x3.fill",
+                    mode: .gallery,
+                    visualSelection: visualSelection
+                )
+                .frame(width: buttonWidth, height: height)
+            }
+            .padding(.horizontal, horizontalInset)
+            .zIndex(2)
+        }
+        .frame(width: width, height: height)
+        .contentShape(Capsule())
+        .onAppear {
+            bubbleMode = selection
+        }
+        .onChange(of: selection) { _, newValue in
+            guard !isAnimating else { return }
+            withAnimation(switchAnimation) {
+                bubbleMode = newValue
+                phase = .settling
+                bubbleScale = 1
+                bubbleScaleX = 1
+                lobeScale = 0.001
+                travelDirection = 0
+            }
+        }
+    }
+
+    private func modeButton(
+        systemName: String,
+        mode: ViewModeSelection,
+        visualSelection: ViewModeSelection
+    ) -> some View {
+        let isSelected = visualSelection == mode
+        let isPressedTarget = pressedMode == mode
+        let iconScale = isSelected ? 1 : (isPressedTarget ? 1.08 : 0.9)
+        let iconColor = isSelected
+            ? Color.black
+            : Color(white: isPressedTarget ? 0.42 : 0.56)
+
+        return Button {
+            animateSelection(to: mode)
+        } label: {
+            Image(systemName: systemName)
+                .font(.system(size: 15.5 * xScale, weight: .semibold))
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(iconColor)
+                .scaleEffect(iconScale)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .animation(.spring(response: 0.24, dampingFraction: 0.76), value: isSelected)
+                .animation(.spring(response: 0.18, dampingFraction: 0.7), value: isPressedTarget)
         }
         .buttonStyle(.plain)
+    }
+
+    private func animateSelection(to mode: ViewModeSelection) {
+        let visualSelection = bubbleMode ?? selection
+        guard mode != visualSelection else {
+            pulseCurrentMode(mode)
+            return
+        }
+        guard !isAnimating else { return }
+
+        isAnimating = true
+        pressedMode = mode
+        phase = .pressing
+        travelDirection = mode == .gallery ? 1 : -1
+
+        withAnimation(.spring(response: 0.18, dampingFraction: 0.72)) {
+            bubbleScale = 1.16
+            bubbleScaleX = 1.10
+            lobeScale = 0.28
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 90_000_000)
+
+            selection = mode
+            phase = .traveling
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+                bubbleMode = mode
+                bubbleScale = 1.12
+                bubbleScaleX = 1.32
+                lobeScale = 0.96
+            }
+
+            try? await Task.sleep(nanoseconds: 270_000_000)
+
+            phase = .settling
+            withAnimation(.spring(response: 0.26, dampingFraction: 0.66)) {
+                bubbleScale = 1
+                bubbleScaleX = 1
+                lobeScale = 0.001
+                pressedMode = nil
+            }
+
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            phase = .idle
+            travelDirection = 0
+            isAnimating = false
+        }
+    }
+
+    private func pulseCurrentMode(_ mode: ViewModeSelection) {
+        pressedMode = mode
+        phase = .pressing
+        travelDirection = 0
+        withAnimation(.spring(response: 0.18, dampingFraction: 0.72)) {
+            bubbleScale = 1.15
+            bubbleScaleX = 1.10
+            lobeScale = 0.22
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            phase = .settling
+            withAnimation(.spring(response: 0.24, dampingFraction: 0.68)) {
+                bubbleScale = 1
+                bubbleScaleX = 1
+                lobeScale = 0.001
+                pressedMode = nil
+            }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            phase = .idle
+            travelDirection = 0
+        }
+    }
+}
+
+private enum ViewModeSwitchPhase {
+    case idle
+    case pressing
+    case traveling
+    case settling
+}
+
+private struct LiquidSelectionBlob: View {
+    let width: CGFloat
+    let height: CGFloat
+    let xScale: CGFloat
+    let lobeScale: CGFloat
+    let travelDirection: CGFloat
+
+    private var lobeOffset: CGFloat {
+        guard travelDirection != 0 else { return 0 }
+        return -travelDirection * width * 0.42
+    }
+
+    var body: some View {
+        let stroke = max(0.6, 0.8 * xScale)
+        let darkStroke = max(0.4, 0.5 * xScale)
+
+        return ZStack {
+            ZStack {
+                Capsule()
+                    .fill(.clear)
+                    .frame(width: height * 0.78, height: height * 0.86)
+                    .glassEffect(.regular.tint(.white.opacity(0.42)).interactive(), in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .fill(lobeOverlay)
+                            .blendMode(.plusLighter)
+                    )
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(Color.white.opacity(0.62), lineWidth: stroke)
+                    )
+                    .scaleEffect(x: max(lobeScale, 0.001), y: max(lobeScale * 0.9, 0.001))
+                    .offset(x: lobeOffset)
+
+                Capsule()
+                    .fill(.clear)
+                    .frame(width: width, height: height)
+                    .glassEffect(.regular.tint(.white.opacity(0.50)).interactive(), in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .fill(mainOverlay)
+                            .blendMode(.plusLighter)
+                    )
+                    .overlay(alignment: .topLeading) {
+                        Capsule()
+                            .fill(Color.white.opacity(0.78))
+                            .frame(width: width * 0.56, height: height * 0.22)
+                            .blur(radius: 3.5 * xScale)
+                            .offset(x: 6 * xScale, y: 3 * xScale)
+                    }
+                    .overlay(alignment: .bottomTrailing) {
+                        Circle()
+                            .stroke(Color.cyan.opacity(0.14), lineWidth: max(0.6, 1.2 * xScale))
+                            .frame(width: height * 0.58, height: height * 0.58)
+                            .blur(radius: 0.8 * xScale)
+                            .offset(x: 2 * xScale, y: 2 * xScale)
+                    }
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(Color.white.opacity(0.94), lineWidth: stroke)
+                    )
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(Color.black.opacity(0.07), lineWidth: darkStroke)
+                            .blur(radius: 0.35 * xScale)
+                    )
+            }
+            .frame(width: width + height * 0.44, height: height + 10 * xScale)
+            .shadow(color: .black.opacity(0.16), radius: 18 * xScale, y: 5 * xScale)
+        }
+        .frame(width: width + height * 0.44, height: height + 10 * xScale)
+        .allowsHitTesting(false)
+    }
+
+    private var mainOverlay: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color.white.opacity(0.58),
+                Color.white.opacity(0.24),
+                Color.white.opacity(0.08)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private var lobeOverlay: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color.white.opacity(0.46),
+                Color.cyan.opacity(0.12),
+                Color.white.opacity(0.06)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
 }
 
@@ -1101,16 +1338,16 @@ private struct HomeTopButton: View {
     let size: CGFloat
 
     var body: some View {
-        Button {
-            isPresented.toggle()
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: max(17, size * 0.43), weight: .semibold))
-                .foregroundStyle(Color.black.opacity(0.82))
-                .frame(width: size, height: size)
-                .glassButtonShape()
-        }
-        .buttonStyle(.plain)
+        LiquidGlassIconButton(
+            systemName: "ellipsis",
+            size: size,
+            symbolSize: max(17, size * 0.43),
+            symbolWeight: .semibold,
+            foregroundColor: Color.black.opacity(0.82),
+            action: {
+                isPresented.toggle()
+            }
+        )
         .accessibilityLabel("Switch settings")
     }
 }
@@ -1127,10 +1364,12 @@ private struct HomeScreenEdgeFadeOverlay: View {
     let edge: FadeEdge
 
     var body: some View {
+        let fadeScale = edge == .bottom ? 0.62 : 1.0
+
         ZStack {
             Rectangle()
                 .fill(.ultraThinMaterial)
-                .opacity(0.16)
+                .opacity(0.16 * fadeScale)
                 .mask(
                     smoothMask(
                         transparentUntil: 0.20,
@@ -1141,7 +1380,7 @@ private struct HomeScreenEdgeFadeOverlay: View {
 
             Rectangle()
                 .fill(.thinMaterial)
-                .opacity(0.18)
+                .opacity(0.18 * fadeScale)
                 .mask(
                     smoothMask(
                         transparentUntil: 0.42,
@@ -1154,10 +1393,10 @@ private struct HomeScreenEdgeFadeOverlay: View {
                 stops: [
                     .init(color: backgroundColor.opacity(0), location: 0),
                     .init(color: backgroundColor.opacity(0), location: 0.24),
-                    .init(color: backgroundColor.opacity(0.04), location: 0.50),
-                    .init(color: backgroundColor.opacity(0.14), location: 0.74),
-                    .init(color: backgroundColor.opacity(0.32), location: 0.92),
-                    .init(color: backgroundColor.opacity(0.42), location: 1)
+                    .init(color: backgroundColor.opacity(0.04 * fadeScale), location: 0.50),
+                    .init(color: backgroundColor.opacity(0.14 * fadeScale), location: 0.74),
+                    .init(color: backgroundColor.opacity(0.32 * fadeScale), location: 0.92),
+                    .init(color: backgroundColor.opacity(0.42 * fadeScale), location: 1)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -1197,39 +1436,52 @@ private struct HomeBottomControls: View {
     }
 
     var body: some View {
-        HStack(spacing: gap) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 16, weight: .regular))
+        let glassScale = height / 50
 
-                Text("Search")
-                    .font(.system(size: 17, weight: .regular))
+        ZStack {
+            GlassEffectContainer(spacing: gap) {
+                HStack(spacing: gap) {
+                    LiquidGlassCapsuleSurface(width: searchWidth, height: height, xScale: glassScale)
+                        .frame(width: searchWidth, height: height)
 
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(Color.black.opacity(0.86))
-            .padding(.horizontal, 18)
-            .frame(width: searchWidth, height: height)
-            .background(
-                Capsule()
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        Capsule()
-                            .fill(Color.white.opacity(0.65))
-                            .blendMode(.plusLighter)
+                    LiquidGlassCapsuleSurface(
+                        width: addButtonSize,
+                        height: addButtonSize,
+                        xScale: addButtonSize / 50
                     )
-                    .shadow(color: .black.opacity(0.12), radius: 40, y: 8)
-            )
-
-            Button(action: addAction) {
-                Image(systemName: "plus")
-                    .font(.system(size: max(20, addButtonSize * 0.44), weight: .semibold))
-                    .foregroundStyle(Color.black.opacity(0.84))
                     .frame(width: addButtonSize, height: addButtonSize)
-                    .glassButtonShape()
+                }
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Add video diary")
+            .allowsHitTesting(false)
+
+            HStack(spacing: gap) {
+                ZStack {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 16, weight: .regular))
+
+                        Text("Search")
+                            .font(.system(size: 17, weight: .regular))
+
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(Color.black)
+                    .padding(.horizontal, 18)
+                }
+                .frame(width: searchWidth, height: height)
+
+                Button(action: addAction) {
+                    ZStack {
+                        Image(systemName: "plus")
+                            .font(.system(size: max(20, addButtonSize * 0.44), weight: .semibold))
+                            .foregroundStyle(Color.black)
+                    }
+                    .frame(width: addButtonSize, height: addButtonSize)
+                    .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add video diary")
+            }
         }
         .frame(width: width, height: max(height, addButtonSize))
     }
@@ -1312,20 +1564,5 @@ private struct HomeScrollOffsetPreferenceKey: PreferenceKey {
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
-    }
-}
-
-private extension View {
-    func glassButtonShape() -> some View {
-        background(
-            Circle()
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Circle()
-                        .fill(Color.white.opacity(0.65))
-                        .blendMode(.plusLighter)
-                )
-                .shadow(color: .black.opacity(0.12), radius: 40, y: 8)
-        )
     }
 }

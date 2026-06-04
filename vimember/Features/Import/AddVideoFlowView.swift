@@ -329,6 +329,7 @@ private struct VideoSelectionPage: View {
                 FigmaGlassCircleButton(
                     systemName: "chevron.left",
                     size: buttonSize,
+                    foregroundColor: .black,
                     action: onCancel
                 )
                 .position(x: (20 * xScale) + buttonSize / 2, y: (69 * yScale) + buttonSize / 2)
@@ -336,6 +337,7 @@ private struct VideoSelectionPage: View {
                 FigmaGlassCircleButton(
                     systemName: "checkmark",
                     size: buttonSize,
+                    foregroundColor: .black,
                     isEnabled: selectedItem != nil && !isPreparingDraft,
                     action: onNext
                 )
@@ -548,6 +550,8 @@ private struct AddVideoEditorView: View {
 
     @MainActor
     private func complete() async {
+        guard !isSaving else { return }
+        focusedField = nil
         isSaving = true
         saveError = nil
 
@@ -695,6 +699,8 @@ struct EditVideoDiaryFlowView: View {
 
     @MainActor
     private func complete() async {
+        guard !isSaving else { return }
+        focusedField = nil
         isSaving = true
         saveError = nil
 
@@ -752,6 +758,10 @@ private struct AddTextPage: View {
                     .foregroundStyle(.white)
                     .tint(.white)
                     .focused(focusedField, equals: .title)
+                    .submitLabel(.next)
+                    .onSubmit {
+                        focusedField.wrappedValue = .body
+                    }
                     .frame(height: 36)
                     .padding(.bottom, 2)
 
@@ -1011,29 +1021,20 @@ private struct AddVideoPreviewPage: View {
 private struct FigmaGlassCircleButton: View {
     let systemName: String
     let size: CGFloat
+    var foregroundColor: Color = .white
     var isEnabled = true
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: max(18, size * 0.43), weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: size, height: size)
-                .background(
-                    Circle()
-                        .fill(.ultraThinMaterial)
-                        .overlay(
-                            Circle()
-                                .fill(Color.white.opacity(0.65))
-                                .blendMode(.plusLighter)
-                        )
-                        .shadow(color: .black.opacity(0.12), radius: 40, y: 8)
-                )
-                .opacity(isEnabled ? 1 : 0.42)
-        }
-        .disabled(!isEnabled)
-        .buttonStyle(.plain)
+        LiquidGlassIconButton(
+            systemName: systemName,
+            size: size,
+            symbolSize: max(18, size * 0.43),
+            symbolWeight: .semibold,
+            foregroundColor: foregroundColor,
+            isEnabled: isEnabled,
+            action: action
+        )
     }
 }
 

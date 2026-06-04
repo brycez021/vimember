@@ -373,15 +373,16 @@ struct MorphingAlbumCardShell: View {
     let shadowYOffset: CGFloat
 
     var body: some View {
-        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .fill(.ultraThinMaterial)
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(overlayColor)
-                    .blendMode(.plusLighter)
+        GlassEffectContainer(spacing: 0) {
+            LiquidGlassRoundedSurface(
+                width: width,
+                height: height,
+                cornerRadius: cornerRadius,
+                xScale: max(width / 380, 0.1),
+                shadowRadius: shadowRadius,
+                shadowYOffset: shadowYOffset
             )
-            .frame(width: width, height: height)
-            .shadow(color: .black.opacity(0.08), radius: shadowRadius, y: shadowYOffset)
+        }
     }
 }
 
@@ -603,6 +604,7 @@ struct GalleryAddAlbumComposerContent: View {
     let yScale: CGFloat
     let onClose: () -> Void
     let onNext: () -> Void
+    @FocusState private var isNameFocused: Bool
 
     var body: some View {
         let cardWidth = 380 * xScale
@@ -635,7 +637,10 @@ struct GalleryAddAlbumComposerContent: View {
                 width: saveWidth,
                 height: saveHeight,
                 isEnabled: true,
-                action: onNext
+                action: {
+                    isNameFocused = false
+                    onNext()
+                }
             )
             .position(x: 329.5 * xScale, y: 43 * yScale)
 
@@ -672,6 +677,10 @@ struct GalleryAddAlbumComposerContent: View {
                 .tint(Color(red: 0, green: 0.478, blue: 1))
                 .textInputAutocapitalization(.words)
                 .submitLabel(.done)
+                .focused($isNameFocused)
+                .onSubmit {
+                    isNameFocused = false
+                }
                 .padding(.leading, 20 * xScale)
                 .padding(.trailing, 28 * xScale)
                 .frame(width: inputWidth, height: inputHeight, alignment: .leading)
@@ -1204,25 +1213,15 @@ private struct GalleryGlassCircleActionButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: symbolSize, weight: .medium))
-                .foregroundStyle(.white)
-                .frame(width: size, height: size)
-                .background(
-                    Circle()
-                        .fill(.ultraThinMaterial)
-                        .overlay(
-                            Circle()
-                                .fill(Color.white.opacity(isEnabled ? 0.54 : 0.28))
-                                .blendMode(.plusLighter)
-                        )
-                        .shadow(color: .black.opacity(0.10), radius: size * 0.45, y: size * 0.12)
-                )
-        }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled)
-        .opacity(isEnabled ? 1 : 0.58)
+        LiquidGlassIconButton(
+            systemName: systemName,
+            size: size,
+            symbolSize: symbolSize,
+            symbolWeight: .medium,
+            foregroundColor: .black,
+            isEnabled: isEnabled,
+            action: action
+        )
     }
 }
 
@@ -1234,24 +1233,14 @@ private struct GalleryGlassPillActionButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 16 * (height / 40), weight: .medium))
-                .tracking(0.16 * (height / 40))
-                .foregroundStyle(.white)
-                .frame(width: width, height: height)
-                .background(
-                    Capsule()
-                        .fill(Color(red: 0, green: 0.54, blue: 1).opacity(isEnabled ? 0.96 : 0.38))
-                        .overlay(
-                            Capsule()
-                                .fill(Color.white.opacity(0.12))
-                                .blendMode(.plusLighter)
-                        )
-                )
-        }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled)
+        LiquidGlassPillButton(
+            width: width,
+            height: height,
+            title: title,
+            foregroundColor: .black,
+            isEnabled: isEnabled,
+            action: action
+        )
     }
 }
 
@@ -1259,19 +1248,19 @@ private struct GalleryTopPlaceholderButton: View {
     let size: CGFloat
 
     var body: some View {
-        Image(systemName: "ellipsis")
-            .font(.system(size: max(17, size * 0.43), weight: .semibold))
-            .foregroundStyle(Color.black.opacity(0.80))
-            .frame(width: size, height: size)
-            .background(
-                Circle()
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        Circle()
-                            .fill(Color.white.opacity(0.65))
-                            .blendMode(.plusLighter)
-                    )
-                    .shadow(color: .black.opacity(0.12), radius: 40, y: 8)
-            )
+        ZStack {
+            GlassEffectContainer(spacing: 0) {
+                LiquidGlassCapsuleSurface(
+                    width: size,
+                    height: size,
+                    xScale: max(size / 44, 0.1)
+                )
+            }
+
+            Image(systemName: "ellipsis")
+                .font(.system(size: max(17, size * 0.43), weight: .semibold))
+                .foregroundStyle(Color.black.opacity(0.80))
+        }
+        .frame(width: size, height: size)
     }
 }
