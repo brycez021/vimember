@@ -551,12 +551,16 @@ private struct AddVideoEditorView: View {
     @MainActor
     private func complete() async {
         guard !isSaving else { return }
-        focusedField = nil
         isSaving = true
         saveError = nil
+        focusedField = nil
+        await commitCurrentTextInput()
+
+        let finalTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalBody = bodyText
 
         do {
-            try await onComplete(title.trimmingCharacters(in: .whitespacesAndNewlines), bodyText)
+            try await onComplete(finalTitle, finalBody)
         } catch {
             saveError = "Unable to save this video diary."
             isSaving = false
@@ -700,12 +704,16 @@ struct EditVideoDiaryFlowView: View {
     @MainActor
     private func complete() async {
         guard !isSaving else { return }
-        focusedField = nil
         isSaving = true
         saveError = nil
+        focusedField = nil
+        await commitCurrentTextInput()
+
+        let finalTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalBody = bodyText
 
         do {
-            try await onComplete(title.trimmingCharacters(in: .whitespacesAndNewlines), bodyText)
+            try await onComplete(finalTitle, finalBody)
             dismiss()
         } catch {
             saveError = "Unable to save this video diary."
@@ -802,6 +810,18 @@ private struct AddTextPage: View {
         .frame(minHeight: screenHeight, alignment: .topLeading)
         .background(backgroundColor.ignoresSafeArea())
     }
+}
+
+@MainActor
+private func commitCurrentTextInput() async {
+    UIApplication.shared.sendAction(
+        #selector(UIResponder.resignFirstResponder),
+        to: nil,
+        from: nil,
+        for: nil
+    )
+    await Task.yield()
+    try? await Task.sleep(nanoseconds: 30_000_000)
 }
 
 private enum AddVideoEditorField {

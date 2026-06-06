@@ -8,8 +8,9 @@ struct DiaryDetailView: View {
     let onSaveEdit: (_ diary: VideoDiary, _ title: String, _ body: String) async throws -> VideoDiary
 
     @State private var currentDiary: VideoDiary
-    @State private var isTextExpanded = false
-    @State private var textDragOffset: CGFloat = 0
+    @State private var panelProgress: CGFloat = 0
+    @State private var panelDragStartProgress: CGFloat?
+    @State private var panelScrollResetID = 0
     @State private var isDeleteConfirmationPresented = false
     @State private var isDeleting = false
     @State private var deleteError: String?
@@ -45,8 +46,6 @@ struct DiaryDetailView: View {
             let detailVideoHeight = screenWidth / max(currentDiary.displayAspectRatio, 0.1)
             let landscapeOpticalLift = 58 * yScale
             let detailVideoYOffset = currentDiary.isLandscapeVideo ? max(0, (screenHeight - detailVideoHeight) / 2 - landscapeOpticalLift) : 0
-            let collapsedTextTop = textLayout.collapsedTextTop
-            let panelY = (isTextExpanded ? 0 : collapsedTextTop) + textDragOffset
 
             ZStack(alignment: .topLeading) {
                 BlendedVideoSurface(
@@ -64,31 +63,20 @@ struct DiaryDetailView: View {
                 )
                 .ignoresSafeArea()
 
-                DetailTextPanel(
+                BottomBlurPanel(
                     diary: currentDiary,
-                    isExpanded: isTextExpanded,
+                    progress: panelProgress,
+                    layout: textLayout,
                     screenWidth: screenWidth,
                     screenHeight: screenHeight,
                     xScale: xScale,
                     yScale: yScale,
-                    backgroundColor: sampledBottomColor
+                    backgroundColor: sampledBottomColor,
+                    scrollResetID: panelScrollResetID
                 )
-                .offset(y: panelY)
                 .contentShape(Rectangle())
-                .simultaneousGesture(textPanelDragGesture(collapsedTextTop: collapsedTextTop, screenHeight: screenHeight))
-                .animation(.snappy(duration: 0.36), value: isTextExpanded)
+                .simultaneousGesture(textPanelDragGesture(revealDistance: textLayout.revealDistance, screenHeight: screenHeight))
                 .zIndex(1)
-
-                if textLayout.isCollapsedTextOverflowing && !isTextExpanded {
-                    DetailBottomTextFadeOverlay(
-                        backgroundColor: sampledBottomColor,
-                        width: screenWidth,
-                        height: textLayout.bottomFadeHeight
-                    )
-                    .position(x: screenWidth / 2, y: screenHeight - textLayout.bottomFadeHeight / 2)
-                    .allowsHitTesting(false)
-                    .zIndex(1.5)
-                }
 
                 DetailTopControls(
                     screenWidth: screenWidth,
@@ -142,31 +130,48 @@ struct DiaryDetailView: View {
         }
     }
 
-    private func textPanelDragGesture(collapsedTextTop: CGFloat, screenHeight: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 12)
+    private func textPanelDragGesture(revealDistance: CGFloat, screenHeight: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 6)
             .onChanged { value in
-                if isTextExpanded {
-                    textDragOffset = min(max(value.translation.height, 0), collapsedTextTop)
-                } else {
-                    textDragOffset = max(min(value.translation.height, 0), -collapsedTextTop)
+                guard shouldTrackPanelDrag(value, screenHeight: screenHeight) else {
+                    return
                 }
+
+                let startProgress = panelDragStartProgress ?? panelProgress
+                panelDragStartProgress = startProgress
+                panelProgress = clampedProgress(startProgress - value.translation.height / revealDistance)
             }
             .onEnded { value in
-                let shouldExpand = !isTextExpanded
-                    && (value.translation.height < -44 || value.predictedEndTranslation.height < -100)
-                let shouldCollapse = isTextExpanded
-                    && value.startLocation.y < screenHeight * 0.38
-                    && (value.translation.height > 110 || value.predictedEndTranslation.height > 190)
+                defer {
+                    panelDragStartProgress = nil
+                }
+                guard let startProgress = panelDragStartProgress else {
+                    return
+                }
 
-                withAnimation(.snappy(duration: 0.36)) {
-                    if shouldExpand {
-                        isTextExpanded = true
-                    } else if shouldCollapse {
-                        isTextExpanded = false
-                    }
-                    textDragOffset = 0
+                let predictedProgress = clampedProgress(startProgress - value.predictedEndTranslation.height / revealDistance)
+                let targetProgress: CGFloat = predictedProgress >= 0.48 ? 1 : 0
+                if targetProgress == 0 {
+                    panelScrollResetID += 1
+                }
+                withAnimation(.interactiveSpring(response: 0.50, dampingFraction: 0.86, blendDuration: 0.12)) {
+                    panelProgress = targetProgress
                 }
             }
+    }
+
+    private func shouldTrackPanelDrag(_ value: DragGesture.Value, screenHeight: CGFloat) -> Bool {
+        if panelProgress < 0.98 {
+            return true
+        }
+        if value.translation.height < 0 {
+            return true
+        }
+        return value.startLocation.y < screenHeight * 0.38
+    }
+
+    private func clampedProgress(_ progress: CGFloat) -> CGFloat {
+        min(max(progress, 0), 1)
     }
 
     @MainActor
@@ -208,16 +213,16 @@ private struct DetailTextLayoutMetrics {
         280 * yScale
     }
 
-    var bottomFadeHeight: CGFloat {
-        250 * yScale
-    }
-
     var collapsedTextTop: CGFloat {
         max(screenHeight - bottomInset - textContentHeight, screenHeight - maxTitleDistanceFromBottom)
     }
 
-    var isCollapsedTextOverflowing: Bool {
-        textContentHeight > maxTitleDistanceFromBottom - bottomInset
+    var expandedTextTop: CGFloat {
+        140 * yScale
+    }
+
+    var revealDistance: CGFloat {
+        max(collapsedTextTop - expandedTextTop, 1)
     }
 
     private var textContentHeight: CGFloat {
@@ -277,14 +282,20 @@ private struct DetailTextLayoutMetrics {
     }
 }
 
-private struct DetailTextPanel: View {
+private struct BottomBlurPanel: View {
     let diary: VideoDiary
-    let isExpanded: Bool
+    let progress: CGFloat
+    let layout: DetailTextLayoutMetrics
     let screenWidth: CGFloat
     let screenHeight: CGFloat
     let xScale: CGFloat
     let yScale: CGFloat
     let backgroundColor: Color
+    let scrollResetID: Int
+
+    private var clampedProgress: CGFloat {
+        min(max(progress, 0), 1)
+    }
 
     private var textLeft: CGFloat {
         23 * xScale
@@ -294,30 +305,93 @@ private struct DetailTextPanel: View {
         min(384 * xScale, screenWidth - textLeft * 2)
     }
 
-    private var expandedTopPadding: CGFloat {
-        140 * yScale
+    private var topFadeBand: CGFloat {
+        104 * yScale
+    }
+
+    private var collapsedHeight: CGFloat {
+        min(screenHeight + topFadeBand, max(topFadeBand, screenHeight - layout.collapsedTextTop + topFadeBand))
+    }
+
+    private var expandedHeight: CGFloat {
+        screenHeight + topFadeBand
+    }
+
+    private var panelHeight: CGFloat {
+        interpolate(collapsedHeight, expandedHeight)
+    }
+
+    private var panelTop: CGFloat {
+        screenHeight - panelHeight
+    }
+
+    private var contentTop: CGFloat {
+        interpolate(topFadeBand, layout.expandedTextTop + topFadeBand)
     }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            if isExpanded {
-                backgroundColor
-                    .opacity(0.96)
-                    .ignoresSafeArea()
-                    .transition(.opacity)
-            }
+            panelBackground
+                .frame(width: screenWidth, height: panelHeight)
+                .mask(panelMask(height: panelHeight))
+                .offset(y: panelTop)
+                .allowsHitTesting(false)
 
-            if isExpanded {
+            ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: false) {
                     textContent
-                        .padding(.top, expandedTopPadding)
+                        .padding(.top, contentTop)
                         .padding(.bottom, 120 * yScale)
+                        .id("detail-text-top")
                 }
-            } else {
-                textContent
+                .id(scrollResetID)
+                .scrollDisabled(clampedProgress < 0.98)
+                .onChange(of: clampedProgress) { _, newProgress in
+                    guard newProgress < 0.98 else { return }
+                    proxy.scrollTo("detail-text-top", anchor: .top)
+                }
+                .onChange(of: scrollResetID) { _, _ in
+                    proxy.scrollTo("detail-text-top", anchor: .top)
+                }
             }
+            .frame(width: screenWidth, height: panelHeight, alignment: .topLeading)
+            .offset(y: panelTop)
+            .clipped()
         }
         .frame(width: screenWidth, height: screenHeight, alignment: .topLeading)
+    }
+
+    private var panelBackground: some View {
+        ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .opacity(interpolate(0.16, 0.54))
+
+            Rectangle()
+                .fill(.regularMaterial)
+                .opacity(interpolate(0.08, 0.30))
+
+            LinearGradient(
+                stops: [
+                    .init(color: backgroundColor.opacity(0), location: 0),
+                    .init(color: backgroundColor.opacity(interpolate(0.04, 0.16)), location: 0.24),
+                    .init(color: backgroundColor.opacity(interpolate(0.22, 0.34)), location: 0.56),
+                    .init(color: backgroundColor.opacity(interpolate(0.78, 0.88)), location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            LinearGradient(
+                stops: [
+                    .init(color: .white.opacity(interpolate(0.03, 0.10)), location: 0.18),
+                    .init(color: .white.opacity(0), location: 0.68)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .blendMode(.plusLighter)
+        }
     }
 
     private var textContent: some View {
@@ -358,73 +432,37 @@ private struct DetailTextPanel: View {
                 paragraphSpacing: 16,
                 labelWidth: textWidth
             )
+            .opacity(interpolate(0.96, 1))
+            .offset(y: interpolate(0, -4 * yScale))
             .padding(.top, 14)
         }
         .frame(width: textWidth, alignment: .topLeading)
         .padding(.leading, textLeft)
     }
-}
 
-private struct DetailBottomTextFadeOverlay: View {
-    let backgroundColor: Color
-    let width: CGFloat
-    let height: CGFloat
+    private func panelMask(height: CGFloat) -> some View {
+        let fadeEnd = min(max(topFadeBand / max(height, 1), 0.10), 0.34)
+        let solidStart = min(fadeEnd + 0.18, 0.54)
 
-    var body: some View {
-        ZStack {
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .opacity(0.16)
-                .mask(
-                    smoothMask(
-                        transparentUntil: 0.20,
-                        softPoint: 0.56,
-                        softOpacity: 0.20
-                    )
-                )
-
-            Rectangle()
-                .fill(.thinMaterial)
-                .opacity(0.18)
-                .mask(
-                    smoothMask(
-                        transparentUntil: 0.42,
-                        softPoint: 0.76,
-                        softOpacity: 0.22
-                    )
-                )
-
-            LinearGradient(
-                stops: [
-                    .init(color: backgroundColor.opacity(0), location: 0),
-                    .init(color: backgroundColor.opacity(0), location: 0.24),
-                    .init(color: backgroundColor.opacity(0.08), location: 0.50),
-                    .init(color: backgroundColor.opacity(0.28), location: 0.74),
-                    .init(color: backgroundColor.opacity(0.70), location: 0.92),
-                    .init(color: backgroundColor.opacity(0.86), location: 1)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        }
-        .frame(width: width, height: height)
-    }
-
-    private func smoothMask(
-        transparentUntil: CGFloat,
-        softPoint: CGFloat,
-        softOpacity: Double
-    ) -> some View {
-        LinearGradient(
+        return LinearGradient(
             stops: [
                 .init(color: .clear, location: 0),
-                .init(color: .clear, location: transparentUntil),
-                .init(color: .white.opacity(softOpacity), location: softPoint),
+                .init(color: .white.opacity(0.08), location: fadeEnd * 0.30),
+                .init(color: .white.opacity(0.46), location: fadeEnd),
+                .init(color: .white, location: solidStart),
                 .init(color: .white, location: 1)
             ],
             startPoint: .top,
             endPoint: .bottom
         )
+    }
+
+    private func interpolate(_ collapsedValue: CGFloat, _ expandedValue: CGFloat) -> CGFloat {
+        collapsedValue + (expandedValue - collapsedValue) * clampedProgress
+    }
+
+    private func interpolate(_ collapsedValue: Double, _ expandedValue: Double) -> Double {
+        collapsedValue + (expandedValue - collapsedValue) * Double(clampedProgress)
     }
 }
 
