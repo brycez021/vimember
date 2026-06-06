@@ -14,6 +14,8 @@ struct BlendedVideoSurface<Content: View>: View {
     let width: CGFloat
     let height: CGFloat?
     let videoYOffset: CGFloat
+    let videoMotionYOffset: CGFloat
+    let videoBlurRadius: CGFloat
     let layout: BlendedVideoSurfaceLayout
     let onBottomColorChange: ((Color) -> Void)?
     let content: (_ videoHeight: CGFloat, _ isLandscape: Bool, _ videoYOffset: CGFloat) -> Content
@@ -28,6 +30,8 @@ struct BlendedVideoSurface<Content: View>: View {
         width: CGFloat,
         height: CGFloat? = nil,
         videoYOffset: CGFloat = 0,
+        videoMotionYOffset: CGFloat = 0,
+        videoBlurRadius: CGFloat = 0,
         layout: BlendedVideoSurfaceLayout = .topAnchored,
         onBottomColorChange: ((Color) -> Void)? = nil,
         @ViewBuilder content: @escaping (_ videoHeight: CGFloat, _ isLandscape: Bool, _ videoYOffset: CGFloat) -> Content
@@ -39,6 +43,8 @@ struct BlendedVideoSurface<Content: View>: View {
         self.width = width
         self.height = height
         self.videoYOffset = videoYOffset
+        self.videoMotionYOffset = videoMotionYOffset
+        self.videoBlurRadius = videoBlurRadius
         self.layout = layout
         self.onBottomColorChange = onBottomColorChange
         self.content = content
@@ -111,7 +117,8 @@ struct BlendedVideoSurface<Content: View>: View {
                 .frame(width: width, height: videoHeight)
                 .mask(clearVideoMask)
                 .clipped()
-                .offset(y: resolvedVideoYOffset)
+                .blur(radius: videoBlurRadius, opaque: true)
+                .offset(y: resolvedVideoYOffset + videoMotionYOffset)
                 .zIndex(0)
 
             if usesCenteredEdges {
@@ -229,6 +236,8 @@ extension BlendedVideoSurface where Content == EmptyView {
         width: CGFloat,
         height: CGFloat? = nil,
         videoYOffset: CGFloat = 0,
+        videoMotionYOffset: CGFloat = 0,
+        videoBlurRadius: CGFloat = 0,
         layout: BlendedVideoSurfaceLayout = .topAnchored,
         onBottomColorChange: ((Color) -> Void)? = nil
     ) {
@@ -240,6 +249,8 @@ extension BlendedVideoSurface where Content == EmptyView {
             width: width,
             height: height,
             videoYOffset: videoYOffset,
+            videoMotionYOffset: videoMotionYOffset,
+            videoBlurRadius: videoBlurRadius,
             layout: layout,
             onBottomColorChange: onBottomColorChange
         ) { _, _, _ in

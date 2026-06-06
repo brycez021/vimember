@@ -46,6 +46,8 @@ struct DiaryDetailView: View {
             let detailVideoHeight = screenWidth / max(currentDiary.displayAspectRatio, 0.1)
             let landscapeOpticalLift = 58 * yScale
             let detailVideoYOffset = currentDiary.isLandscapeVideo ? max(0, (screenHeight - detailVideoHeight) / 2 - landscapeOpticalLift) : 0
+            let detailVideoMotionYOffset = -(textLayout.revealDistance * panelProgress / 3)
+            let detailVideoBlurRadius = 32 * yScale * smoothStep(panelProgress)
 
             ZStack(alignment: .topLeading) {
                 BlendedVideoSurface(
@@ -56,6 +58,8 @@ struct DiaryDetailView: View {
                     width: screenWidth,
                     height: screenHeight,
                     videoYOffset: detailVideoYOffset,
+                    videoMotionYOffset: detailVideoMotionYOffset,
+                    videoBlurRadius: detailVideoBlurRadius,
                     layout: videoSurfaceLayout,
                     onBottomColorChange: { color in
                         sampledBottomColor = color
@@ -181,6 +185,11 @@ struct DiaryDetailView: View {
 
     private func clampedProgress(_ progress: CGFloat) -> CGFloat {
         min(max(progress, 0), 1)
+    }
+
+    private func smoothStep(_ progress: CGFloat) -> CGFloat {
+        let normalized = clampedProgress(progress)
+        return normalized * normalized * (3 - 2 * normalized)
     }
 
     @MainActor
