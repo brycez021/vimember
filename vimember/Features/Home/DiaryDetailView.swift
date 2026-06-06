@@ -92,6 +92,7 @@ struct DiaryDetailView: View {
                 .zIndex(1)
 
                 DetailTopControls(
+                    progress: panelProgress,
                     screenWidth: screenWidth,
                     xScale: xScale,
                     yScale: yScale,
@@ -631,6 +632,7 @@ private struct DetailBodyTextLabel: UIViewRepresentable {
 }
 
 private struct DetailTopControls: View {
+    let progress: CGFloat
     let screenWidth: CGFloat
     let xScale: CGFloat
     let yScale: CGFloat
@@ -660,30 +662,25 @@ private struct DetailTopControls: View {
             )
             .position(x: (20 * xScale) + buttonSize / 2, y: centerY)
 
-            DetailGlassIconButton(
-                systemName: "trash",
-                size: buttonSize,
+            DetailMorphingActionButton(
+                progress: progress,
+                collapsedSize: buttonSize,
+                expandedWidth: editWidth,
                 isEnabled: !isDeleting,
-                action: onDelete
+                onDelete: onDelete,
+                onEdit: onEdit
             )
-            .position(
-                x: editCenterX - editWidth / 2 - (10 * xScale) - buttonSize / 2,
-                y: centerY
-            )
-
-            DetailGlassPillButton(
-                systemName: "pencil",
-                width: editWidth,
-                height: buttonSize,
-                action: onEdit
-            )
-            .position(x: editCenterX, y: centerY)
+            .position(x: morphingActionCenterX, y: centerY)
         }
         .frame(width: screenWidth, height: centerY + buttonSize / 2, alignment: .topLeading)
     }
 
-    private var editCenterX: CGFloat {
-        screenWidth - (20 * xScale) - editWidth / 2
+    private var morphingActionCenterX: CGFloat {
+        let clampedProgress = min(max(progress, 0), 1)
+        let smoothProgress = clampedProgress * clampedProgress * (3 - 2 * clampedProgress)
+        let width = buttonSize + (editWidth - buttonSize) * smoothProgress
+        let rightEdge = screenWidth - 20 * xScale
+        return rightEdge - width / 2
     }
 }
 
@@ -706,20 +703,69 @@ private struct DetailGlassIconButton: View {
     }
 }
 
-private struct DetailGlassPillButton: View {
-    let systemName: String
-    let width: CGFloat
-    let height: CGFloat
-    let action: () -> Void
+private struct DetailMorphingActionButton: View {
+    let progress: CGFloat
+    let collapsedSize: CGFloat
+    let expandedWidth: CGFloat
+    let isEnabled: Bool
+    let onDelete: () -> Void
+    let onEdit: () -> Void
+
+    private var clampedProgress: CGFloat {
+        min(max(progress, 0), 1)
+    }
+
+    private var smoothProgress: CGFloat {
+        clampedProgress * clampedProgress * (3 - 2 * clampedProgress)
+    }
+
+    private var width: CGFloat {
+        collapsedSize + (expandedWidth - collapsedSize) * smoothProgress
+    }
+
+    private var isDeleteMode: Bool {
+        clampedProgress < 0.5
+    }
+
+    private var isButtonEnabled: Bool {
+        isDeleteMode ? isEnabled : true
+    }
 
     var body: some View {
-        LiquidGlassPillButton(
-            width: width,
-            height: height,
-            systemName: systemName,
-            symbolSize: max(18, height * 0.40),
-            foregroundColor: .white,
-            action: action
-        )
+        Button {
+            if isDeleteMode {
+                onDelete()
+            } else {
+                onEdit()
+            }
+        } label: {
+            ZStack {
+                GlassEffectContainer(spacing: 0) {
+                    LiquidGlassCapsuleSurface(
+                        width: width,
+                        height: collapsedSize,
+                        xScale: max(collapsedSize / 44, 0.1),
+                        isEnabled: isButtonEnabled
+                    )
+                }
+
+                Image(systemName: "trash")
+                    .font(.system(size: max(18, collapsedSize * 0.42), weight: .semibold))
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(.white)
+                    .opacity((1 - Double(smoothProgress)) * (isButtonEnabled ? 1 : 0.42))
+
+                Image(systemName: "pencil")
+                    .font(.system(size: max(18, collapsedSize * 0.40), weight: .semibold))
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(.white)
+                    .opacity(Double(smoothProgress) * (isButtonEnabled ? 1 : 0.42))
+            }
+            .frame(width: width, height: collapsedSize)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isButtonEnabled)
+        .accessibilityLabel(isDeleteMode ? "Delete" : "Edit")
     }
 }

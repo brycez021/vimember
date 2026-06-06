@@ -92,6 +92,10 @@ struct BlendedVideoSurface<Content: View>: View {
         return layout == .centeredLandscapeEdges ? max(0, centeredYOffset) : centeredYOffset
     }
 
+    private var visualVideoYOffset: CGFloat {
+        resolvedVideoYOffset + videoMotionYOffset
+    }
+
     private var blendTopOffset: CGFloat {
         if isLandscape {
             return max(0, videoHeight - blendHeight)
@@ -115,23 +119,20 @@ struct BlendedVideoSurface<Content: View>: View {
 
             VideoPlayerSurface(url: url, isPlaying: isPlaying, videoGravity: .resizeAspectFill)
                 .frame(width: width, height: videoHeight)
+                .blur(radius: videoBlurRadius, opaque: true)
                 .mask(clearVideoMask)
                 .clipped()
-                .blur(radius: videoBlurRadius, opaque: true)
-                .offset(y: resolvedVideoYOffset + videoMotionYOffset)
+                .offset(y: visualVideoYOffset)
                 .zIndex(0)
 
-            if usesCenteredEdges {
-                centeredLandscapeEdgeBlendLayers
-                    .zIndex(1)
-            } else {
+            if !usesCenteredEdges {
                 pureColorBlendLayer
                     .frame(height: blendMaskHeight)
                     .offset(y: resolvedVideoYOffset + blendTopOffset)
                     .zIndex(1)
             }
 
-            content(videoHeight, isLandscape, resolvedVideoYOffset)
+            content(videoHeight, isLandscape, visualVideoYOffset)
                 .zIndex(2)
         }
         .frame(width: width, height: renderHeight)
@@ -141,19 +142,6 @@ struct BlendedVideoSurface<Content: View>: View {
             let sample = await VideoColorSampler.shared.sample(for: url, fallback: fallbackTint)
             bottomColor = sample.bottomColor
             onBottomColorChange?(sample.bottomColor)
-        }
-    }
-
-    private var centeredLandscapeEdgeBlendLayers: some View {
-        ZStack(alignment: .top) {
-            pureColorBlendLayer
-                .frame(height: blendMaskHeight)
-                .scaleEffect(y: -1, anchor: .center)
-                .offset(y: resolvedVideoYOffset - colorBlockOverflow)
-
-            pureColorBlendLayer
-                .frame(height: blendMaskHeight)
-                .offset(y: resolvedVideoYOffset + blendTopOffset)
         }
     }
 
@@ -189,12 +177,14 @@ struct BlendedVideoSurface<Content: View>: View {
             LinearGradient(
                 stops: [
                     .init(color: .clear, location: 0),
-                    .init(color: .black.opacity(0.12), location: 0.02),
-                    .init(color: .black.opacity(0.50), location: 0.10),
-                    .init(color: .black, location: 0.22),
-                    .init(color: .black, location: clearVideoFadeStart),
-                    .init(color: .black.opacity(0.50), location: 0.90),
-                    .init(color: .black.opacity(0.12), location: 0.98),
+                    .init(color: .black.opacity(0.08), location: 0.04),
+                    .init(color: .black.opacity(0.32), location: 0.10),
+                    .init(color: .black.opacity(0.70), location: 0.18),
+                    .init(color: .black, location: 0.30),
+                    .init(color: .black, location: 0.70),
+                    .init(color: .black.opacity(0.70), location: 0.82),
+                    .init(color: .black.opacity(0.32), location: 0.90),
+                    .init(color: .black.opacity(0.08), location: 0.96),
                     .init(color: .clear, location: 1)
                 ],
                 startPoint: .top,
