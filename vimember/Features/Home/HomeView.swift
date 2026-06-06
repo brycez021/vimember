@@ -248,9 +248,7 @@ struct HomeView: View {
                         size: 44 * xScale,
                         symbolSize: 18 * xScale,
                         action: {
-                            withAnimation(.snappy(duration: 0.24)) {
-                                selectedAlbumID = nil
-                            }
+                            clearSelectedAlbum()
                         }
                     )
                     .position(
@@ -500,7 +498,7 @@ struct HomeView: View {
     }
 
     @MainActor
-    private func createAlbum(name: String, diaryIDs: [VideoDiary.ID]) {
+    private func createAlbum(id: VideoAlbum.ID = UUID(), name: String, diaryIDs: [VideoDiary.ID]) {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalName = trimmedName.isEmpty ? "New Album" : trimmedName
         let orderedIDs = diaryIDs.reduce(into: [VideoDiary.ID]()) { result, id in
@@ -514,6 +512,7 @@ struct HomeView: View {
 
         albums.insert(
             VideoAlbum(
+                id: id,
                 name: finalName,
                 diaryIDs: orderedIDs,
                 coverDiaryID: coverID
@@ -562,7 +561,7 @@ struct HomeView: View {
     private func showAlbumVideoPicker(forFallbackDiary diary: VideoDiary) {
         draftAlbumName = fallbackAlbumTitle(for: diary)
         selectedAlbumDiaryIDs = [diary.id]
-        editingAlbumID = nil
+        editingAlbumID = diary.id
         withAnimation(.snappy(duration: 0.28)) {
             isAddAlbumComposerContentVisible = false
             isAlbumHeaderHidden = false
@@ -573,11 +572,23 @@ struct HomeView: View {
 
     @MainActor
     private func showSelectedAlbum(_ albumID: VideoAlbum.ID) {
+        guard selectedAlbumID != albumID else {
+            clearSelectedAlbum()
+            return
+        }
+
         withAnimation(.snappy(duration: 0.24)) {
             selectedAlbumID = albumID
             isAlbumHeaderHidden = false
             resetHomeScrollTracking()
             activeDiaryID = nil
+        }
+    }
+
+    @MainActor
+    private func clearSelectedAlbum() {
+        withAnimation(.snappy(duration: 0.24)) {
+            selectedAlbumID = nil
         }
     }
 
@@ -616,8 +627,9 @@ struct HomeView: View {
             albums[albumIndex].coverDiaryID = orderedIDs.first
             selectedAlbumID = editingAlbumID
         } else {
-            createAlbum(name: draftAlbumName, diaryIDs: selectedAlbumDiaryIDs)
-            selectedAlbumID = albums.first?.id
+            let newAlbumID = editingAlbumID ?? UUID()
+            createAlbum(id: newAlbumID, name: draftAlbumName, diaryIDs: selectedAlbumDiaryIDs)
+            selectedAlbumID = newAlbumID
         }
 
         closeAddAlbumFlow()

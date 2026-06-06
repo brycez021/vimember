@@ -547,7 +547,7 @@ private struct DetailTopControls: View {
     }
 
     private var centerY: CGFloat {
-        (52 * yScale) + buttonSize / 2
+        (52 * yScale) + buttonSize / 2 + 16 * yScale
     }
 
     var body: some View {

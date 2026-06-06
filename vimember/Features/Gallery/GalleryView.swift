@@ -1,4 +1,5 @@
 import AVFoundation
+import QuickLookThumbnailing
 import SwiftUI
 import UIKit
 
@@ -269,8 +270,11 @@ struct GalleryAlbumStrip: View {
             )
         }
 
+        let representedDiaryIDs = Set(albums.flatMap(\.diaryIDs))
         let fillerCount = max(0, 4 - realItems.count)
-        let fillerItems = diaries.prefix(fillerCount).map { diary in
+        let fillerItems = diaries.filter { diary in
+            !representedDiaryIDs.contains(diary.id)
+        }.prefix(fillerCount).map { diary in
             GalleryAlbumDisplayItem(
                 id: "diary-\(diary.id.uuidString)",
                 albumID: diary.id,
@@ -419,14 +423,14 @@ private struct GalleryAlbumItem: View {
                             targetSize: CGSize(width: coverSize * 2, height: coverSize * 2)
                         )
                         .frame(width: coverSize, height: coverSize)
-                        .saturation(isDimmed ? 0.05 : 1)
-                        .opacity(isDimmed ? 0.56 : 1)
-                        .blur(radius: isDimmed ? size * (0.5 / 70) : 0)
+                        .saturation(isDimmed ? 0.58 : 1)
+                        .opacity(isDimmed ? 0.78 : 1)
+                        .blur(radius: 0)
                         .clipShape(Circle())
 
                         if isDimmed {
                             Circle()
-                                .fill(Color.white.opacity(0.34))
+                                .fill(Color.white.opacity(0.16))
                                 .frame(width: coverSize, height: coverSize)
                         }
 
@@ -441,7 +445,7 @@ private struct GalleryAlbumItem: View {
                     Text(title)
                         .font(.system(size: size * (14 / 70), weight: .regular))
                         .tracking(size * (0.14 / 70))
-                        .foregroundStyle(isDimmed ? Color(white: 0.53) : Color(white: 0.24))
+                        .foregroundStyle(isDimmed ? Color(white: 0.46) : Color(white: 0.24))
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .frame(width: size * (67 / 70), height: size * (22 / 70), alignment: .top)
@@ -538,15 +542,15 @@ struct GalleryAlbumAddMorphOverlay: View {
     }
 
     private var shellWidth: CGFloat {
-        isExpanded ? expandedShellFrame.width : 56 * xScale
+        isExpanded ? expandedShellFrame.width : 70 * xScale
     }
 
     private var shellHeight: CGFloat {
-        isExpanded ? expandedShellFrame.height : 56 * xScale
+        isExpanded ? expandedShellFrame.height : 70 * xScale
     }
 
     private var shellCornerRadius: CGFloat {
-        isExpanded ? 24 * xScale : 28 * xScale
+        35 * xScale
     }
 
     private var shellOverlayColor: Color {
@@ -636,6 +640,8 @@ struct GalleryAddAlbumComposerContent: View {
                 title: "Save",
                 width: saveWidth,
                 height: saveHeight,
+                backgroundColor: Color(red: 0, green: 0.478, blue: 1),
+                foregroundColor: .white,
                 isEnabled: true,
                 action: {
                     isNameFocused = false
@@ -698,11 +704,11 @@ private struct GalleryAlbumAddMorphTransitionDemo: View {
     @State private var contentVisible = false
 
     var body: some View {
-        let collapsedCenter = CGPoint(x: 54, y: 156)
+        let collapsedCenter = CGPoint(x: 55, y: 156)
         let expandedShellFrame = CGRect(x: 20, y: 121, width: 380, height: 416)
-        let shellWidth = isExpanded ? expandedShellFrame.width : 56
-        let shellHeight = isExpanded ? expandedShellFrame.height : 56
-        let shellCornerRadius: CGFloat = isExpanded ? 24 : 28
+        let shellWidth = isExpanded ? expandedShellFrame.width : 70
+        let shellHeight = isExpanded ? expandedShellFrame.height : 70
+        let shellCornerRadius: CGFloat = 35
         let shellCenter = isExpanded
             ? CGPoint(x: expandedShellFrame.midX, y: expandedShellFrame.midY)
             : collapsedCenter
@@ -775,6 +781,9 @@ struct GalleryAlbumVideoPicker: View {
             let cardWidth = (screenWidth - gridGap * 2) / 3
             let cardHeight = cardWidth * (184 / 138)
             let gridTop = 130 * yScale
+            let topControlSize = 44 * xScale
+            let topControlSide = 20 * xScale
+            let topControlCenterY = (52 * yScale) + topControlSize / 2 + 16 * yScale
             let rowCount = max(1, Int(ceil(Double(diaries.count) / 3.0)))
             let contentHeight = max(
                 screenHeight + 1,
@@ -818,25 +827,27 @@ struct GalleryAlbumVideoPicker: View {
                     .tracking(24 * xScale * 0.01)
                     .foregroundStyle(.black)
                     .lineLimit(1)
-                    .frame(width: 250 * xScale, alignment: .leading)
-                    .offset(x: 20 * xScale, y: 76 * yScale)
+                    .frame(width: screenWidth, alignment: .center)
+                    .offset(y: 76 * yScale)
 
                 GalleryGlassCircleActionButton(
                     systemName: "chevron.left",
-                    size: 44 * xScale,
+                    size: topControlSize,
                     symbolSize: 20 * xScale,
                     action: onBack
                 )
-                .position(x: 20 * xScale + 22 * xScale, y: 52 * yScale + 22 * xScale)
+                .position(x: topControlSide + topControlSize / 2, y: topControlCenterY)
 
                 GalleryGlassPillActionButton(
                     title: "Save",
                     width: 71 * xScale,
-                    height: 40 * xScale,
+                    height: topControlSize,
+                    backgroundColor: Color(red: 0, green: 0.478, blue: 1),
+                    foregroundColor: .white,
                     isEnabled: !selectedDiaryIDs.isEmpty,
                     action: onSave
                 )
-                .position(x: screenWidth - 20 * xScale - 35.5 * xScale, y: 54 * yScale + 20 * xScale)
+                .position(x: screenWidth - topControlSide - (71 * xScale) / 2, y: topControlCenterY)
             }
             .frame(width: screenWidth, height: screenHeight)
             .ignoresSafeArea()
@@ -1084,35 +1095,16 @@ private actor GalleryThumbnailLoader {
             return cached
         }
 
-        let image = await Task.detached(priority: .utility) { () -> UIImage? in
-            guard !url.isFileURL || FileManager.default.isReadableFile(atPath: url.path) else {
-                return nil
-            }
-
-            let asset = AVURLAsset(url: url)
-            let duration = (try? await asset.load(.duration)) ?? .zero
-            let durationSeconds = CMTimeGetSeconds(duration)
-            let candidateSeconds = Self.thumbnailCandidateSeconds(durationSeconds: durationSeconds)
-            let generator = AVAssetImageGenerator(asset: asset)
-            generator.appliesPreferredTrackTransform = true
-            generator.requestedTimeToleranceBefore = .positiveInfinity
-            generator.requestedTimeToleranceAfter = .positiveInfinity
-            generator.maximumSize = CGSize(
-                width: max(320, targetSize.width),
-                height: max(320, targetSize.height)
-            )
-
-            for seconds in candidateSeconds {
-                if let cgImage = try? generator.copyCGImage(
-                    at: CMTime(seconds: seconds, preferredTimescale: 600),
-                    actualTime: nil
-                ) {
-                    return UIImage(cgImage: cgImage)
-                }
-            }
-
+        guard !url.isFileURL || FileManager.default.isReadableFile(atPath: url.path) else {
             return nil
-        }.value
+        }
+
+        let image: UIImage?
+        if let assetThumbnail = await makeAssetThumbnail(for: url, targetSize: targetSize) {
+            image = assetThumbnail
+        } else {
+            image = await makeQuickLookThumbnail(for: url, targetSize: targetSize)
+        }
 
         if let image {
             cache[url] = image
@@ -1120,18 +1112,73 @@ private actor GalleryThumbnailLoader {
         return image
     }
 
+    private func makeAssetThumbnail(for url: URL, targetSize: CGSize) async -> UIImage? {
+        let asset = AVURLAsset(url: url)
+        let tracks = (try? await asset.load(.tracks)) ?? []
+        guard tracks.contains(where: { $0.mediaType == .video }) else {
+            return nil
+        }
+
+        let duration = (try? await asset.load(.duration)) ?? .zero
+        let durationSeconds = CMTimeGetSeconds(duration)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = CMTime(seconds: 0.25, preferredTimescale: 600)
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.25, preferredTimescale: 600)
+        generator.maximumSize = CGSize(
+            width: max(320, targetSize.width),
+            height: max(320, targetSize.height)
+        )
+
+        for seconds in Self.thumbnailCandidateSeconds(durationSeconds: durationSeconds) {
+            let time = CMTime(seconds: seconds, preferredTimescale: 600)
+            if let image = autoreleasepool(invoking: { () -> UIImage? in
+                guard let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) else {
+                    return nil
+                }
+                return UIImage(cgImage: cgImage)
+            }) {
+                return image
+            }
+        }
+
+        return nil
+    }
+
+    private func makeQuickLookThumbnail(for url: URL, targetSize: CGSize) async -> UIImage? {
+        guard url.isFileURL else {
+            return nil
+        }
+
+        let scale = await MainActor.run { UIScreen.main.scale }
+        let request = QLThumbnailGenerator.Request(
+            fileAt: url,
+            size: CGSize(width: max(80, targetSize.width), height: max(80, targetSize.height)),
+            scale: scale,
+            representationTypes: [.thumbnail, .lowQualityThumbnail]
+        )
+
+        return await withCheckedContinuation { continuation in
+            QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { thumbnail, _ in
+                continuation.resume(returning: thumbnail?.uiImage)
+            }
+        }
+    }
+
     private nonisolated static func thumbnailCandidateSeconds(durationSeconds: Double) -> [Double] {
         guard durationSeconds.isFinite, durationSeconds > 0 else {
             return [0]
         }
 
-        let upperBound = max(0, durationSeconds - 0.05)
+        let endPadding = min(0.05, durationSeconds * 0.1)
+        let upperBound = max(0, durationSeconds - endPadding)
         let candidates = [
             durationSeconds / 2,
             min(0.8, upperBound),
+            durationSeconds * 0.25,
+            durationSeconds * 0.75,
             0,
-            durationSeconds / 3,
-            min(durationSeconds * 0.08, upperBound)
+            min(0.1, upperBound)
         ]
 
         return candidates.reduce(into: [Double]()) { result, seconds in
@@ -1229,18 +1276,50 @@ private struct GalleryGlassPillActionButton: View {
     let title: String
     let width: CGFloat
     let height: CGFloat
+    var backgroundColor: Color?
+    var foregroundColor: Color = .black
     let isEnabled: Bool
     let action: () -> Void
 
     var body: some View {
-        LiquidGlassPillButton(
-            width: width,
-            height: height,
-            title: title,
-            foregroundColor: .black,
-            isEnabled: isEnabled,
-            action: action
-        )
+        if let backgroundColor {
+            Button(action: action) {
+                ZStack {
+                    GlassEffectContainer(spacing: 0) {
+                        LiquidGlassCapsuleSurface(
+                            width: width,
+                            height: height,
+                            xScale: max(height / 44, 0.1),
+                            isEnabled: isEnabled
+                        )
+                    }
+
+                    Capsule()
+                        .fill(backgroundColor)
+                        .opacity(isEnabled ? 0.82 : 0.34)
+                        .allowsHitTesting(false)
+
+                    Text(title)
+                        .font(.system(size: 16 * (height / 40), weight: .medium))
+                        .tracking(0.16 * (height / 40))
+                        .foregroundStyle(foregroundColor)
+                        .opacity(isEnabled ? 1 : 0.42)
+                }
+                .frame(width: width, height: height)
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(!isEnabled)
+        } else {
+            LiquidGlassPillButton(
+                width: width,
+                height: height,
+                title: title,
+                foregroundColor: foregroundColor,
+                isEnabled: isEnabled,
+                action: action
+            )
+        }
     }
 }
 
