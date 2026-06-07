@@ -46,10 +46,11 @@ struct HomeView: View {
             let yScale = screenHeight / designScreenHeight
             let phoneFrameLeft = (viewport.width - cardWidth) / 2
             let bottomSearchWidth: CGFloat = 306 * xScale
-            let bottomAddButtonSize: CGFloat = 50 * xScale
+            let bottomAddButtonSize: CGFloat = 58 * xScale
             let bottomControlsGap: CGFloat = 10 * xScale
-            let bottomControlsHeight: CGFloat = 50 * xScale
-            let bottomControlsBottomMargin: CGFloat = 27 * yScale
+            let bottomControlsHeight: CGFloat = bottomAddButtonSize
+            let bottomControlsRightMargin: CGFloat = 28 * xScale
+            let bottomControlsBottomMargin: CGFloat = 28 * yScale
             let screenEdgeFadeHeight: CGFloat = 250 * yScale
             let albumTop: CGFloat = 121 * yScale
             let albumHeaderOffsetY: CGFloat = isAlbumHeaderHidden ? -226 * yScale : 0
@@ -274,13 +275,14 @@ struct HomeView: View {
                     height: bottomControlsHeight,
                     addButtonSize: bottomAddButtonSize,
                     gap: bottomControlsGap,
+                    isSearchVisible: false,
                     addAction: {
                         isImportPresented = true
                     }
                 )
                     .position(
-                        x: screenWidth / 2,
-                        y: screenHeight - bottomControlsBottomMargin - bottomControlsHeight / 2
+                        x: screenWidth - bottomControlsRightMargin - bottomAddButtonSize / 2,
+                        y: screenHeight - bottomControlsBottomMargin - bottomAddButtonSize / 2
                     )
                     .zIndex(2)
 
@@ -1441,20 +1443,24 @@ private struct HomeBottomControls: View {
     let height: CGFloat
     let addButtonSize: CGFloat
     let gap: CGFloat
+    let isSearchVisible: Bool
     let addAction: () -> Void
 
     private var width: CGFloat {
-        searchWidth + gap + addButtonSize
+        isSearchVisible ? searchWidth + gap + addButtonSize : addButtonSize
     }
 
     var body: some View {
         let glassScale = height / 50
+        let visibleGap = isSearchVisible ? gap : 0
 
         ZStack {
-            GlassEffectContainer(spacing: gap) {
-                HStack(spacing: gap) {
-                    LiquidGlassCapsuleSurface(width: searchWidth, height: height, xScale: glassScale)
-                        .frame(width: searchWidth, height: height)
+            GlassEffectContainer(spacing: visibleGap) {
+                HStack(spacing: visibleGap) {
+                    if isSearchVisible {
+                        LiquidGlassCapsuleSurface(width: searchWidth, height: height, xScale: glassScale)
+                            .frame(width: searchWidth, height: height)
+                    }
 
                     LiquidGlassCapsuleSurface(
                         width: addButtonSize,
@@ -1466,21 +1472,23 @@ private struct HomeBottomControls: View {
             }
             .allowsHitTesting(false)
 
-            HStack(spacing: gap) {
-                ZStack {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 16, weight: .regular))
+            HStack(spacing: visibleGap) {
+                if isSearchVisible {
+                    ZStack {
+                        HStack(spacing: 8) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 16, weight: .regular))
 
-                        Text("Search")
-                            .font(.system(size: 17, weight: .regular))
+                            Text("Search")
+                                .font(.system(size: 17, weight: .regular))
 
-                        Spacer(minLength: 0)
+                            Spacer(minLength: 0)
+                        }
+                        .foregroundStyle(Color.black)
+                        .padding(.horizontal, 18)
                     }
-                    .foregroundStyle(Color.black)
-                    .padding(.horizontal, 18)
+                    .frame(width: searchWidth, height: height)
                 }
-                .frame(width: searchWidth, height: height)
 
                 Button(action: addAction) {
                     ZStack {

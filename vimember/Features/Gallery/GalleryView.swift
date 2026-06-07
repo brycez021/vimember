@@ -377,16 +377,21 @@ struct MorphingAlbumCardShell: View {
     let shadowYOffset: CGFloat
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+
         GlassEffectContainer(spacing: 0) {
             LiquidGlassRoundedSurface(
                 width: width,
                 height: height,
                 cornerRadius: cornerRadius,
                 xScale: max(width / 380, 0.1),
-                shadowRadius: shadowRadius,
-                shadowYOffset: shadowYOffset
+                shadowRadius: 0,
+                shadowYOffset: 0
             )
         }
+        .frame(width: width, height: height)
+        .clipShape(shape)
+        .shadow(color: .black.opacity(0.14), radius: shadowRadius, y: shadowYOffset)
     }
 }
 
