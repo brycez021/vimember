@@ -192,6 +192,7 @@ struct HomeView: View {
                                     ForEach(visibleDiaries) { diary in
                                         VideoDiaryCard(
                                             diary: diary,
+                                            albumTagTitles: albumTagTitles(for: diary),
                                             width: cardWidth,
                                             isActive: activeDiaryID == diary.id
                                         )
@@ -243,22 +244,6 @@ struct HomeView: View {
                     y: 68 * yScale + 22 * xScale
                 )
                 .zIndex(3)
-
-                if isAlbumFilterActive {
-                    HomeAlbumExitButton(
-                        size: 44 * xScale,
-                        symbolSize: 18 * xScale,
-                        action: {
-                            clearSelectedAlbum()
-                        }
-                    )
-                    .position(
-                        x: 241 * xScale + 22 * xScale,
-                        y: 68 * yScale + 22 * xScale
-                    )
-                    .transition(.scale(scale: 0.82).combined(with: .opacity))
-                    .zIndex(3)
-                }
 
                 HomeScreenEdgeFadeOverlay(
                     backgroundColor: .white,
@@ -335,6 +320,12 @@ struct HomeView: View {
                 DragGesture(minimumDistance: 6, coordinateSpace: .global)
                     .onChanged { value in
                         updateAlbumHeaderVisibility(dragTranslation: value.translation)
+                    }
+                    .onEnded { value in
+                        exitSelectedAlbumIfNeeded(
+                            dragValue: value,
+                            screenWidth: screenWidth
+                        )
                     }
             )
             .coordinateSpace(name: GalleryAddAlbumMorphCoordinateSpace.name)
@@ -595,6 +586,33 @@ struct HomeView: View {
     }
 
     @MainActor
+    private func exitSelectedAlbumIfNeeded(dragValue: DragGesture.Value, screenWidth: CGFloat) {
+        guard selectedAlbumID != nil else {
+            return
+        }
+
+        guard !isAddAlbumComposerPresented && !isAlbumVideoPickerPresented else {
+            return
+        }
+
+        let edgeStartWidth = min(max(screenWidth * 0.35, 88), 140)
+        guard dragValue.startLocation.x <= edgeStartWidth else {
+            return
+        }
+
+        let horizontalDistance = dragValue.translation.width
+        let verticalDistance = abs(dragValue.translation.height)
+        let projectedHorizontalDistance = dragValue.predictedEndTranslation.width
+        let rightwardDistance = max(horizontalDistance, projectedHorizontalDistance)
+
+        guard rightwardDistance > 64, rightwardDistance > verticalDistance * 1.35 else {
+            return
+        }
+
+        clearSelectedAlbum()
+    }
+
+    @MainActor
     private func closeAddAlbumFlow() {
         withAnimation(.snappy(duration: 0.24)) {
             isAddAlbumComposerContentVisible = false
@@ -672,6 +690,22 @@ struct HomeView: View {
             return "Album"
         }
         return String(first)
+    }
+
+    private func albumTagTitles(for diary: VideoDiary) -> [String] {
+        let matchingAlbumNames = albums
+            .filter { $0.diaryIDs.contains(diary.id) }
+            .map(\.name)
+
+        guard !matchingAlbumNames.isEmpty else {
+            return [fallbackAlbumTitle(for: diary)]
+        }
+
+        guard matchingAlbumNames.count > 3 else {
+            return matchingAlbumNames
+        }
+
+        return Array(matchingAlbumNames.prefix(2)) + ["..."]
     }
 }
 
@@ -1030,6 +1064,7 @@ private struct LiquidSelectionBlob: View {
 
 private struct VideoDiaryCard: View {
     let diary: VideoDiary
+    let albumTagTitles: [String]
     let width: CGFloat
     let isActive: Bool
 
@@ -1055,6 +1090,7 @@ private struct VideoDiaryCard: View {
         ) { _, _, _ in
             DiaryTextBlock(
                 diary: diary,
+                albumTagTitles: albumTagTitles,
                 width: width,
                 cardHeight: cardHeight,
                 isLandscapeVideo: diary.isLandscapeVideo
@@ -1066,6 +1102,7 @@ private struct VideoDiaryCard: View {
 
 private struct DiaryTextBlock: View {
     let diary: VideoDiary
+    let albumTagTitles: [String]
     let width: CGFloat
     let cardHeight: CGFloat
     let isLandscapeVideo: Bool
@@ -1073,6 +1110,7 @@ private struct DiaryTextBlock: View {
     var body: some View {
         HomeDiaryTextOverlay(
             diary: diary,
+            albumTagTitles: albumTagTitles,
             width: width,
             cardHeight: cardHeight,
             layout: isLandscapeVideo ? .landscape : .vertical
@@ -1082,6 +1120,7 @@ private struct DiaryTextBlock: View {
 
 private struct HomeDiaryTextOverlay: View {
     let diary: VideoDiary
+    let albumTagTitles: [String]
     let width: CGFloat
     let cardHeight: CGFloat
     let layout: Layout
@@ -1233,13 +1272,11 @@ private struct HomeDiaryTextOverlay: View {
                 y: cardHeight - scaled(layout.titleTopFromBottom)
             )
 
-            HomeSingleLineTextLabel(
+            HomeDateAlbumLine(
                 text: diary.dateText,
-                fontName: "PingFangSC-Medium",
-                fontSize: scaled(14),
-                letterSpacing: scaled(0.14),
-                labelWidth: scaled(layout.dateWidth),
-                labelHeight: scaled(22)
+                albumTagTitles: albumTagTitles,
+                width: scaled(layout.dateWidth),
+                scale: scale
             )
             .offset(
                 x: scaled(layout.dateX),
@@ -1344,6 +1381,95 @@ private struct HomeSingleLineTextLabel: View {
 
     private var visualHeight: CGFloat {
         max(labelHeight, fontSize * 1.2)
+    }
+}
+
+private struct HomeDateAlbumLine: View {
+    let text: String
+    let albumTagTitles: [String]
+    let width: CGFloat
+    let scale: CGFloat
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8 * scale) {
+            Text(text)
+                .font(.custom("PingFangSC-Medium", size: 14 * scale))
+                .tracking(0.14 * scale)
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+
+            ForEach(Array(albumTagTitles.enumerated()), id: \.offset) { _, title in
+                HomeAlbumTagPill(title: title, scale: scale)
+            }
+        }
+        .frame(width: width, height: 22 * scale, alignment: .leading)
+        .allowsHitTesting(false)
+    }
+}
+
+private struct HomeAlbumTagPill: View {
+    let title: String
+    let scale: CGFloat
+
+    private var height: CGFloat {
+        14 * scale
+    }
+
+    private var width: CGFloat {
+        (title == "..." ? 21 : 53) * scale
+    }
+
+    var body: some View {
+        ZStack {
+            HomeAlbumTagGlassSurface(width: width, height: height, scale: scale)
+
+            Text(title)
+                .font(.system(size: 8 * scale, weight: .medium))
+                .tracking(0.08 * scale)
+                .foregroundStyle(Color(red: 0.24, green: 0.24, blue: 0.24))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(width: width - 8 * scale, height: height, alignment: .center)
+        }
+        .frame(width: width, height: height)
+    }
+}
+
+private struct HomeAlbumTagGlassSurface: View {
+    let width: CGFloat
+    let height: CGFloat
+    let scale: CGFloat
+
+    var body: some View {
+        Capsule()
+            .fill(Color.white.opacity(0.18))
+            .frame(width: width, height: height)
+            .glassEffect(.regular.tint(.white.opacity(0.42)), in: Capsule())
+            .overlay(
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.38),
+                                Color.white.opacity(0.10),
+                                Color.white.opacity(0.02)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .blendMode(.plusLighter)
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(Color.white.opacity(0.72), lineWidth: max(0.45, 0.55 * scale))
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(Color.black.opacity(0.06), lineWidth: max(0.25, 0.35 * scale))
+            )
+            .shadow(color: .black.opacity(0.08), radius: 2.2 * scale, y: 0.8 * scale)
     }
 }
 
