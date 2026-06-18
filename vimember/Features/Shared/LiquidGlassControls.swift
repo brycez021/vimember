@@ -202,24 +202,14 @@ struct LiquidGlassIconButton: View {
 
     var body: some View {
         Button(action: action) {
-            ZStack {
-                GlassEffectContainer(spacing: 0) {
-                    LiquidGlassCapsuleSurface(
-                        width: size,
-                        height: size,
-                        xScale: max(size / 44, 0.1),
-                        isEnabled: isEnabled
-                    )
-                }
-
-                Image(systemName: systemName)
-                    .font(.system(size: symbolSize, weight: symbolWeight))
-                    .symbolRenderingMode(.monochrome)
-                    .foregroundStyle(foregroundColor)
-                    .opacity(isEnabled ? 1 : 0.42)
-            }
-            .frame(width: size, height: size)
-            .contentShape(Circle())
+            Image(systemName: systemName)
+                .font(.system(size: symbolSize, weight: symbolWeight))
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(foregroundColor)
+                .opacity(isEnabled ? 1 : 0.42)
+                .frame(width: size, height: size)
+                .contentShape(Circle())
+                .glassEffect(.regular.interactive(), in: Circle())
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
@@ -239,15 +229,6 @@ struct LiquidGlassPillButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                GlassEffectContainer(spacing: 0) {
-                    LiquidGlassCapsuleSurface(
-                        width: width,
-                        height: height,
-                        xScale: max(height / 44, 0.1),
-                        isEnabled: isEnabled
-                    )
-                }
-
                 if let title {
                     Text(title)
                         .font(.system(size: 16 * (height / 40), weight: .medium))
@@ -264,6 +245,7 @@ struct LiquidGlassPillButton: View {
             }
             .frame(width: width, height: height)
             .contentShape(Capsule())
+            .glassEffect(.regular.interactive(), in: Capsule())
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)

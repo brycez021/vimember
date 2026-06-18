@@ -95,6 +95,12 @@ struct AddVideoFlowView: View {
         )
         modelContext.insert(record)
         try modelContext.save()
+        Task(priority: .utility) {
+            _ = await VideoDerivedAssetStore.shared.prepareGalleryAssets(
+                for: VideoFileStore.url(for: filename),
+                fallback: draft.fallbackTint
+            )
+        }
         dismiss()
     }
 }
@@ -295,6 +301,8 @@ private struct VideoSelectionPage: View {
             let xScale = screenWidth / designWidth
             let yScale = screenHeight / designHeight
             let buttonSize = 44 * xScale
+            let buttonTop = 52 * yScale + 16 * yScale
+            let buttonCenterY = buttonTop + buttonSize / 2
             let gridItemSize = (screenWidth - 4) / 3
 
             ZStack(alignment: .topLeading) {
@@ -332,7 +340,7 @@ private struct VideoSelectionPage: View {
                     foregroundColor: .black,
                     action: onCancel
                 )
-                .position(x: (20 * xScale) + buttonSize / 2, y: (69 * yScale) + buttonSize / 2)
+                .position(x: (20 * xScale) + buttonSize / 2, y: buttonCenterY)
 
                 FigmaGlassCircleButton(
                     systemName: "checkmark",
@@ -341,14 +349,14 @@ private struct VideoSelectionPage: View {
                     isEnabled: selectedItem != nil && !isPreparingDraft,
                     action: onNext
                 )
-                .position(x: screenWidth - (20 * xScale) - buttonSize / 2, y: (69 * yScale) + buttonSize / 2)
+                .position(x: screenWidth - (20 * xScale) - buttonSize / 2, y: buttonCenterY)
 
                 if isPreparingDraft {
                     ProgressView()
                         .tint(.white)
                         .frame(width: buttonSize, height: buttonSize)
                         .background(.black.opacity(0.18), in: Circle())
-                        .position(x: screenWidth - (20 * xScale) - buttonSize / 2, y: (69 * yScale) + buttonSize / 2)
+                        .position(x: screenWidth - (20 * xScale) - buttonSize / 2, y: buttonCenterY)
                 }
             }
             .frame(width: screenWidth, height: screenHeight)
@@ -453,7 +461,7 @@ private struct AddVideoEditorView: View {
             let xScale = screenWidth / designWidth
             let yScale = screenHeight / designHeight
             let buttonSize = 44 * xScale
-            let buttonTop = 52 * yScale
+            let buttonTop = 52 * yScale + 16 * yScale
             let buttonSide = 20 * xScale
 
             ScrollViewReader { proxy in
@@ -495,7 +503,7 @@ private struct AddVideoEditorView: View {
                             .id("text")
                         }
                     }
-                    .scrollDismissesKeyboard(.interactively)
+                    .scrollDismissesKeyboard(.never)
                     .ignoresSafeArea()
                     .onAppear {
                         DispatchQueue.main.async {
@@ -602,7 +610,7 @@ struct EditVideoDiaryFlowView: View {
             let xScale = screenWidth / designWidth
             let yScale = screenHeight / designHeight
             let buttonSize = 44 * xScale
-            let buttonTop = 52 * yScale
+            let buttonTop = 52 * yScale + 16 * yScale
             let buttonSide = 20 * xScale
 
             ScrollViewReader { proxy in
@@ -646,7 +654,7 @@ struct EditVideoDiaryFlowView: View {
                             .id("text")
                         }
                     }
-                    .scrollDismissesKeyboard(.interactively)
+                    .scrollDismissesKeyboard(.never)
                     .ignoresSafeArea()
                     .onAppear {
                         DispatchQueue.main.async {
@@ -742,6 +750,10 @@ private struct AddTextPage: View {
         let buttonSize = 44 * xScale
         let buttonTop = 52 * yScale
         let arrowCenterY = buttonTop + buttonSize / 2
+        let titleHitVerticalPadding = 12 * yScale
+        let bodyMinimumHeight = max(240 * yScale, screenHeight - textTop - 260 * yScale)
+        let bodyEditorOffsetX = -5 * xScale
+        let bodyEditorOffsetY = -9 * yScale
 
         ZStack(alignment: .topLeading) {
             Button(action: onUp) {
@@ -771,6 +783,13 @@ private struct AddTextPage: View {
                         focusedField.wrappedValue = .body
                     }
                     .frame(height: 36)
+                    .padding(.vertical, titleHitVerticalPadding)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        focusedField.wrappedValue = .title
+                    }
+                    .padding(.vertical, -titleHitVerticalPadding)
+                    .offset(y: -4)
                     .padding(.bottom, 2)
 
                 Text(dateText)
@@ -787,20 +806,38 @@ private struct AddTextPage: View {
                     .padding(.bottom, 14)
 
                 ZStack(alignment: .topLeading) {
-                    if bodyText.isEmpty {
-                        AddTextPlaceholderLabel(
-                            text: "Start writing...",
-                            labelWidth: textWidth
-                        )
-                            .allowsHitTesting(false)
-                    }
-
-                    AddBodyTextView(
-                        text: $bodyText,
-                        focusedField: focusedField,
-                        preferredWidth: textWidth
+                    AddTextPlaceholderLabel(
+                        text: "Start writing...",
+                        labelWidth: textWidth
                     )
+                    .opacity(bodyText.isEmpty ? 1 : 0)
+                    .allowsHitTesting(false)
+
+                    TextEditor(text: $bodyText)
+                        .font(.custom("PingFangSC-Regular", size: 16))
+                        .tracking(0.16)
+                        .lineSpacing(3)
+                        .foregroundStyle(.white)
+                        .tint(.white)
+                        .focused(focusedField, equals: .body)
+                        .scrollContentBackground(.hidden)
+                        .contentMargins(.all, 0, for: .scrollContent)
+                        .background(Color.clear)
+                        .frame(
+                            minWidth: textWidth,
+                            maxWidth: textWidth,
+                            minHeight: bodyMinimumHeight,
+                            alignment: .topLeading
+                        )
+                        .offset(x: bodyEditorOffsetX, y: bodyEditorOffsetY)
                 }
+                .frame(
+                    minWidth: textWidth,
+                    maxWidth: textWidth,
+                    minHeight: bodyMinimumHeight,
+                    alignment: .topLeading
+                )
+                .offset(y: -4 * yScale)
             }
             .frame(width: textWidth, alignment: .leading)
             .padding(.leading, textLeft)
@@ -814,6 +851,13 @@ private struct AddTextPage: View {
 
 @MainActor
 private func commitCurrentTextInput() async {
+    await Task.yield()
+    try? await Task.sleep(nanoseconds: 30_000_000)
+    UIApplication.shared.connectedScenes
+        .compactMap { $0 as? UIWindowScene }
+        .flatMap(\.windows)
+        .first(where: \.isKeyWindow)?
+        .endEditing(true)
     UIApplication.shared.sendAction(
         #selector(UIResponder.resignFirstResponder),
         to: nil,
@@ -872,102 +916,6 @@ private struct AddTextPlaceholderLabel: UIViewRepresentable {
     }
 }
 
-private struct AddBodyTextView: UIViewRepresentable {
-    @Binding var text: String
-    var focusedField: FocusState<AddVideoEditorField?>.Binding
-    let preferredWidth: CGFloat
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-
-    func makeUIView(context: Context) -> UITextView {
-        let textView = UITextView()
-        textView.delegate = context.coordinator
-        textView.backgroundColor = .clear
-        textView.textColor = .white
-        textView.tintColor = .white
-        textView.textContainerInset = .zero
-        textView.textContainer.lineFragmentPadding = 0
-        textView.isScrollEnabled = false
-        textView.showsVerticalScrollIndicator = false
-        textView.alwaysBounceVertical = false
-        textView.autocorrectionType = .yes
-        textView.autocapitalizationType = .sentences
-        textView.keyboardDismissMode = .interactive
-        textView.typingAttributes = Self.textAttributes
-        textView.setContentHuggingPriority(.required, for: .vertical)
-        textView.setContentCompressionResistancePriority(.required, for: .vertical)
-        return textView
-    }
-
-    func updateUIView(_ textView: UITextView, context: Context) {
-        context.coordinator.parent = self
-
-        if textView.text != text {
-            textView.attributedText = NSAttributedString(string: text, attributes: Self.textAttributes)
-        }
-        textView.typingAttributes = Self.textAttributes
-
-        if focusedField.wrappedValue == .body {
-            if !textView.isFirstResponder {
-                textView.becomeFirstResponder()
-            }
-        } else if textView.isFirstResponder {
-            textView.resignFirstResponder()
-        }
-    }
-
-    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
-        let width = proposal.width ?? preferredWidth
-        let fittingSize = uiView.sizeThatFits(
-            CGSize(width: width, height: CGFloat.greatestFiniteMagnitude)
-        )
-        return CGSize(width: width, height: max(22, fittingSize.height))
-    }
-
-    final class Coordinator: NSObject, UITextViewDelegate {
-        var parent: AddBodyTextView
-
-        init(_ parent: AddBodyTextView) {
-            self.parent = parent
-        }
-
-        func textViewDidBeginEditing(_ textView: UITextView) {
-            parent.focusedField.wrappedValue = .body
-        }
-
-        func textViewDidEndEditing(_ textView: UITextView) {
-            if parent.focusedField.wrappedValue == .body {
-                parent.focusedField.wrappedValue = nil
-            }
-        }
-
-        func textViewDidChange(_ textView: UITextView) {
-            parent.text = textView.text
-            textView.typingAttributes = AddBodyTextView.textAttributes
-        }
-    }
-
-    private static var textAttributes: [NSAttributedString.Key: Any] {
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.minimumLineHeight = 22
-        paragraph.maximumLineHeight = 22
-        paragraph.paragraphSpacing = 16
-        paragraph.lineBreakMode = .byWordWrapping
-
-        let font = UIFont(name: "PingFangSC-Regular", size: 16)
-            ?? .systemFont(ofSize: 16, weight: .regular)
-
-        return [
-            .font: font,
-            .foregroundColor: UIColor.white,
-            .kern: 0.16,
-            .paragraphStyle: paragraph
-        ]
-    }
-}
-
 private struct AddVideoPreviewPage: View {
     let videoURL: URL?
     let aspectRatio: CGFloat
@@ -1018,6 +966,7 @@ private struct AddVideoPreviewPage: View {
                 aspectRatio: aspectRatio,
                 fallbackTint: fallbackTint,
                 isPlaying: true,
+                isMuted: false,
                 width: screenWidth,
                 height: screenHeight,
                 layout: .centeredEdges,
