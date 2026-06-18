@@ -21,9 +21,6 @@ struct HomeView: View {
     @State private var isAlbumVideoPickerPresented = false
     @State private var draftAlbumName = ""
     @State private var selectedAlbumDiaryIDs: [VideoDiary.ID] = []
-    @State private var albumCollapseProgress: CGFloat = 0
-    @State private var lastHomeScrollAnchorY: CGFloat?
-    @State private var homeScrollAnchorY: CGFloat?
     @State private var addAlbumButtonFrame: CGRect?
 
     private var diaries: [VideoDiary] {
@@ -54,12 +51,9 @@ struct HomeView: View {
             let screenEdgeFadeHeight: CGFloat = 250 * yScale
             let albumTop: CGFloat = 121 * yScale
             let albumHeaderHeight: CGFloat = 226 * yScale
-            let albumCollapseDistance = albumHeaderHeight * albumCollapseProgress
-            let albumHeaderOffsetY = -albumCollapseDistance
-            let collapsedGalleryTitleTop = 239 * yScale - albumCollapseDistance
             let addAlbumFallbackCenter = CGPoint(
                 x: 55 * xScale,
-                y: albumHeaderOffsetY + 134 * yScale + 35 * xScale
+                y: 134 * yScale + 35 * xScale
             )
             let addAlbumShellFrame = CGRect(
                 x: 20 * xScale,
@@ -74,7 +68,6 @@ struct HomeView: View {
                 height: 426 * yScale
             )
             let videoGridTop: CGFloat = 280 * yScale
-            let collapsedVideoGridTop = videoGridTop - albumCollapseDistance
             let gridGap: CGFloat = 3 * xScale
             let galleryCardWidth = (screenWidth - gridGap * 2) / 3
             let galleryCardHeight = galleryCardWidth * (184 / 138)
@@ -94,13 +87,9 @@ struct HomeView: View {
                     switch nextSelection {
                     case .timeline:
                         isGalleryMode = false
-                        albumCollapseProgress = 0
-                        resetHomeScrollTracking()
                         activeDiaryID = visibleDiaries.first?.id
                     case .gallery:
                         isGalleryMode = true
-                        albumCollapseProgress = 0
-                        resetHomeScrollTracking()
                         activeDiaryID = nil
                     }
                 }
@@ -139,17 +128,25 @@ struct HomeView: View {
 
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(spacing: 0) {
-                        GeometryReader { proxy in
-                            Color.clear.preference(
-                                key: HomeScrollOffsetPreferenceKey.self,
-                                value: proxy.frame(in: .named("home-scroll")).minY
-                            )
-                        }
-                        .frame(width: screenWidth, height: 1)
-
                         ZStack(alignment: .topLeading) {
+                            HomeAlbumHeader(
+                                diaries: diaries,
+                                albums: albums,
+                                selectedAlbumID: selectedAlbumID,
+                                screenWidth: screenWidth,
+                                xScale: xScale,
+                                yScale: yScale,
+                                onAddAlbum: {
+                                    showAddAlbumComposer()
+                                },
+                                onSelectAlbum: { albumID in
+                                    showSelectedAlbum(albumID)
+                                }
+                            )
+                            .frame(width: screenWidth, height: albumHeaderHeight, alignment: .topLeading)
+
                             GallerySectionTitle(galleryTitle, xScale: xScale)
-                                .offset(x: 20 * xScale, y: collapsedGalleryTitleTop)
+                                .offset(x: 20 * xScale, y: 239 * yScale)
 
                             if isGalleryMode {
                                 LazyVGrid(
@@ -190,7 +187,7 @@ struct HomeView: View {
                                     }
                                 }
                                 .frame(width: screenWidth, alignment: .leading)
-                                .offset(y: collapsedVideoGridTop)
+                                .offset(y: videoGridTop)
                             } else {
                                 LazyVStack(spacing: timelineCardSpacing) {
                                     ForEach(visibleDiaries) { diary in
@@ -209,7 +206,7 @@ struct HomeView: View {
                                     }
                                 }
                                 .frame(width: cardWidth)
-                                .offset(x: phoneFrameLeft, y: collapsedVideoGridTop)
+                                .offset(x: phoneFrameLeft, y: videoGridTop)
                             }
                         }
                         .frame(width: screenWidth, height: scrollContentHeight, alignment: .topLeading)
@@ -220,30 +217,6 @@ struct HomeView: View {
                     guard !isGalleryMode else { return }
                     scheduleActiveCardUpdate(frames: frames, viewport: viewport)
                 }
-                .onPreferenceChange(HomeScrollOffsetPreferenceKey.self) { scrollOffset in
-                    updateAlbumCollapseProgress(
-                        scrollOffset: scrollOffset,
-                        albumHeaderHeight: albumHeaderHeight
-                    )
-                }
-
-                HomeAlbumHeader(
-                    diaries: diaries,
-                    albums: albums,
-                    selectedAlbumID: selectedAlbumID,
-                    screenWidth: screenWidth,
-                    xScale: xScale,
-                    yScale: yScale,
-                    onAddAlbum: {
-                        showAddAlbumComposer()
-                    },
-                    onSelectAlbum: { albumID in
-                        showSelectedAlbum(albumID)
-                    }
-                )
-                .frame(width: screenWidth, height: albumHeaderHeight, alignment: .topLeading)
-                .offset(y: albumHeaderOffsetY)
-                .zIndex(2)
 
                 ViewModeSwitch(selection: viewModeSelection, xScale: xScale)
                 .position(
@@ -395,63 +368,6 @@ struct HomeView: View {
     }
 
     @MainActor
-    private func updateAlbumCollapseProgress(scrollOffset anchorY: CGFloat, albumHeaderHeight: CGFloat) {
-        guard !isAddAlbumComposerPresented && !isAlbumVideoPickerPresented else {
-            resetHomeScrollTracking(anchorY: anchorY)
-            return
-        }
-
-        if homeScrollAnchorY == nil {
-            homeScrollAnchorY = anchorY
-        }
-
-        let initialAnchorY = homeScrollAnchorY ?? anchorY
-        let scrollDistance = max(0, initialAnchorY - anchorY)
-        let lastAnchorY = lastHomeScrollAnchorY
-        lastHomeScrollAnchorY = anchorY
-
-        if let lastAnchorY, anchorY > lastAnchorY {
-            setAlbumCollapseProgress(0, animated: true)
-            resetHomeScrollTracking(anchorY: anchorY)
-            return
-        }
-
-        if scrollDistance <= 0 {
-            setAlbumCollapseProgress(0, animated: false)
-            return
-        }
-
-        setAlbumCollapseProgress(scrollDistance / max(albumHeaderHeight, 1), animated: false)
-    }
-
-    @MainActor
-    private func resetHomeScrollTracking(anchorY: CGFloat? = nil) {
-        homeScrollAnchorY = anchorY
-        lastHomeScrollAnchorY = nil
-    }
-
-    @MainActor
-    private func setAlbumCollapseProgress(_ progress: CGFloat, animated: Bool) {
-        let clampedProgress = min(max(progress, 0), 1)
-        guard abs(albumCollapseProgress - clampedProgress) > 0.001 else {
-            return
-        }
-
-        if animated {
-            withAnimation(.snappy(duration: 0.2)) {
-                albumCollapseProgress = clampedProgress
-            }
-        } else {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            transaction.animation = nil
-            withTransaction(transaction) {
-                albumCollapseProgress = clampedProgress
-            }
-        }
-    }
-
-    @MainActor
     private func deleteDiary(_ diary: VideoDiary) async throws {
         if let record = records.first(where: { $0.id == diary.id }) {
             try await VideoFileStore.deleteVideo(named: record.localVideoFilename)
@@ -523,7 +439,6 @@ struct HomeView: View {
         editingAlbumID = nil
         withAnimation(.snappy(duration: 0.32)) {
             isAddAlbumComposerContentVisible = false
-            albumCollapseProgress = 0
             isAddAlbumComposerPresented = true
             isAlbumVideoPickerPresented = false
         }
@@ -534,7 +449,6 @@ struct HomeView: View {
     private func showAlbumVideoPicker() {
         withAnimation(.snappy(duration: 0.28)) {
             isAddAlbumComposerContentVisible = false
-            albumCollapseProgress = 0
             isAddAlbumComposerPresented = false
             isAlbumVideoPickerPresented = true
         }
@@ -547,7 +461,6 @@ struct HomeView: View {
         editingAlbumID = album.id
         withAnimation(.snappy(duration: 0.28)) {
             isAddAlbumComposerContentVisible = false
-            albumCollapseProgress = 0
             isAddAlbumComposerPresented = false
             isAlbumVideoPickerPresented = true
         }
@@ -560,7 +473,6 @@ struct HomeView: View {
         editingAlbumID = diary.id
         withAnimation(.snappy(duration: 0.28)) {
             isAddAlbumComposerContentVisible = false
-            albumCollapseProgress = 0
             isAddAlbumComposerPresented = false
             isAlbumVideoPickerPresented = true
         }
@@ -575,8 +487,6 @@ struct HomeView: View {
 
         withAnimation(.snappy(duration: 0.24)) {
             selectedAlbumID = albumID
-            albumCollapseProgress = 0
-            resetHomeScrollTracking()
             activeDiaryID = nil
         }
     }
@@ -1705,13 +1615,5 @@ private struct CardVisibilityPreferenceKey: PreferenceKey {
 
     static func reduce(value: inout [VideoDiary.ID: CGRect], nextValue: () -> [VideoDiary.ID: CGRect]) {
         value.merge(nextValue(), uniquingKeysWith: { _, next in next })
-    }
-}
-
-private struct HomeScrollOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
