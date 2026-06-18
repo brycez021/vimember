@@ -21,6 +21,9 @@ struct HomeView: View {
     @State private var isAlbumVideoPickerPresented = false
     @State private var draftAlbumName = ""
     @State private var selectedAlbumDiaryIDs: [VideoDiary.ID] = []
+    @State private var isAlbumHeaderHidden = false
+    @State private var lastHomeScrollOffset: CGFloat?
+    @State private var homeScrollAnchorY: CGFloat?
     @State private var addAlbumButtonFrame: CGRect?
 
     private var diaries: [VideoDiary] {
@@ -50,10 +53,10 @@ struct HomeView: View {
             let bottomControlsBottomMargin: CGFloat = 28 * yScale
             let screenEdgeFadeHeight: CGFloat = 250 * yScale
             let albumTop: CGFloat = 121 * yScale
-            let albumHeaderHeight: CGFloat = 226 * yScale
+            let albumHeaderOffsetY: CGFloat = isAlbumHeaderHidden ? -226 * yScale : 0
             let addAlbumFallbackCenter = CGPoint(
                 x: 55 * xScale,
-                y: 134 * yScale + 35 * xScale
+                y: albumHeaderOffsetY + 134 * yScale + 35 * xScale
             )
             let addAlbumShellFrame = CGRect(
                 x: 20 * xScale,
@@ -87,9 +90,13 @@ struct HomeView: View {
                     switch nextSelection {
                     case .timeline:
                         isGalleryMode = false
+                        isAlbumHeaderHidden = false
+                        resetHomeScrollTracking()
                         activeDiaryID = visibleDiaries.first?.id
                     case .gallery:
                         isGalleryMode = true
+                        isAlbumHeaderHidden = false
+                        resetHomeScrollTracking()
                         activeDiaryID = nil
                     }
                 }
@@ -128,23 +135,15 @@ struct HomeView: View {
 
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(spacing: 0) {
-                        ZStack(alignment: .topLeading) {
-                            HomeAlbumHeader(
-                                diaries: diaries,
-                                albums: albums,
-                                selectedAlbumID: selectedAlbumID,
-                                screenWidth: screenWidth,
-                                xScale: xScale,
-                                yScale: yScale,
-                                onAddAlbum: {
-                                    showAddAlbumComposer()
-                                },
-                                onSelectAlbum: { albumID in
-                                    showSelectedAlbum(albumID)
-                                }
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: HomeScrollOffsetPreferenceKey.self,
+                                value: proxy.frame(in: .global).minY
                             )
-                            .frame(width: screenWidth, height: albumHeaderHeight, alignment: .topLeading)
+                        }
+                        .frame(width: screenWidth, height: 1)
 
+                        ZStack(alignment: .topLeading) {
                             GallerySectionTitle(galleryTitle, xScale: xScale)
                                 .offset(x: 20 * xScale, y: 239 * yScale)
 
@@ -217,6 +216,27 @@ struct HomeView: View {
                     guard !isGalleryMode else { return }
                     scheduleActiveCardUpdate(frames: frames, viewport: viewport)
                 }
+                .onPreferenceChange(HomeScrollOffsetPreferenceKey.self) { scrollOffset in
+                    updateAlbumHeaderVisibility(scrollOffset: scrollOffset)
+                }
+
+                HomeAlbumHeader(
+                    diaries: diaries,
+                    albums: albums,
+                    selectedAlbumID: selectedAlbumID,
+                    screenWidth: screenWidth,
+                    xScale: xScale,
+                    yScale: yScale,
+                    onAddAlbum: {
+                        showAddAlbumComposer()
+                    },
+                    onSelectAlbum: { albumID in
+                        showSelectedAlbum(albumID)
+                    }
+                )
+                .frame(width: screenWidth, height: 226 * yScale, alignment: .topLeading)
+                .offset(y: isAlbumHeaderHidden ? -226 * yScale : 0)
+                .zIndex(2)
 
                 ViewModeSwitch(selection: viewModeSelection, xScale: xScale)
                 .position(
@@ -298,6 +318,9 @@ struct HomeView: View {
             }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 6, coordinateSpace: .global)
+                    .onChanged { value in
+                        updateAlbumHeaderVisibility(dragTranslation: value.translation)
+                    }
                     .onEnded { value in
                         exitSelectedAlbumIfNeeded(
                             dragValue: value,
@@ -313,6 +336,7 @@ struct HomeView: View {
             .animation(.snappy(duration: 0.24), value: isGalleryMode)
             .animation(.snappy(duration: 0.32), value: isAddAlbumComposerPresented)
             .animation(.snappy(duration: 0.24), value: isAlbumVideoPickerPresented)
+            .animation(.snappy(duration: 0.26), value: isAlbumHeaderHidden)
             .onAppear {
                 activeDiaryID = isGalleryMode ? nil : visibleDiaries.first?.id
             }
@@ -365,6 +389,64 @@ struct HomeView: View {
                 activeDiaryID = bestID
             }
         }
+    }
+
+    @MainActor
+    private func updateAlbumHeaderVisibility(dragTranslation: CGSize) {
+        guard !isAddAlbumComposerPresented && !isAlbumVideoPickerPresented else {
+            return
+        }
+
+        guard abs(dragTranslation.height) > abs(dragTranslation.width) else {
+            return
+        }
+
+        if dragTranslation.height < -10 {
+            isAlbumHeaderHidden = true
+        } else if dragTranslation.height > 6 {
+            isAlbumHeaderHidden = false
+        }
+    }
+
+    @MainActor
+    private func updateAlbumHeaderVisibility(scrollOffset anchorY: CGFloat) {
+        guard !isAddAlbumComposerPresented && !isAlbumVideoPickerPresented else {
+            resetHomeScrollTracking(anchorY: anchorY)
+            return
+        }
+
+        if homeScrollAnchorY == nil {
+            homeScrollAnchorY = anchorY
+        }
+
+        let scrollOffset = anchorY - (homeScrollAnchorY ?? anchorY)
+
+        defer {
+            lastHomeScrollOffset = scrollOffset
+        }
+
+        guard let lastHomeScrollOffset else {
+            isAlbumHeaderHidden = false
+            return
+        }
+
+        if scrollOffset > -6 {
+            isAlbumHeaderHidden = false
+            return
+        }
+
+        let delta = scrollOffset - lastHomeScrollOffset
+        if delta < -8, scrollOffset < -18 {
+            isAlbumHeaderHidden = true
+        } else if delta > 4 {
+            isAlbumHeaderHidden = false
+        }
+    }
+
+    @MainActor
+    private func resetHomeScrollTracking(anchorY: CGFloat? = nil) {
+        homeScrollAnchorY = anchorY
+        lastHomeScrollOffset = nil
     }
 
     @MainActor
@@ -439,6 +521,7 @@ struct HomeView: View {
         editingAlbumID = nil
         withAnimation(.snappy(duration: 0.32)) {
             isAddAlbumComposerContentVisible = false
+            isAlbumHeaderHidden = false
             isAddAlbumComposerPresented = true
             isAlbumVideoPickerPresented = false
         }
@@ -461,6 +544,7 @@ struct HomeView: View {
         editingAlbumID = album.id
         withAnimation(.snappy(duration: 0.28)) {
             isAddAlbumComposerContentVisible = false
+            isAlbumHeaderHidden = false
             isAddAlbumComposerPresented = false
             isAlbumVideoPickerPresented = true
         }
@@ -473,6 +557,7 @@ struct HomeView: View {
         editingAlbumID = diary.id
         withAnimation(.snappy(duration: 0.28)) {
             isAddAlbumComposerContentVisible = false
+            isAlbumHeaderHidden = false
             isAddAlbumComposerPresented = false
             isAlbumVideoPickerPresented = true
         }
@@ -487,6 +572,8 @@ struct HomeView: View {
 
         withAnimation(.snappy(duration: 0.24)) {
             selectedAlbumID = albumID
+            isAlbumHeaderHidden = false
+            resetHomeScrollTracking()
             activeDiaryID = nil
         }
     }
@@ -1615,5 +1702,13 @@ private struct CardVisibilityPreferenceKey: PreferenceKey {
 
     static func reduce(value: inout [VideoDiary.ID: CGRect], nextValue: () -> [VideoDiary.ID: CGRect]) {
         value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+    }
+}
+
+private struct HomeScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
