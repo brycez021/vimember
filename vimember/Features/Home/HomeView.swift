@@ -56,6 +56,7 @@ struct HomeView: View {
             let albumHeaderHeight: CGFloat = 226 * yScale
             let albumCollapseDistance = albumHeaderHeight * albumCollapseProgress
             let albumHeaderOffsetY = -albumCollapseDistance
+            let collapsedGalleryTitleTop = 239 * yScale - albumCollapseDistance
             let addAlbumFallbackCenter = CGPoint(
                 x: 55 * xScale,
                 y: albumHeaderOffsetY + 134 * yScale + 35 * xScale
@@ -73,6 +74,7 @@ struct HomeView: View {
                 height: 426 * yScale
             )
             let videoGridTop: CGFloat = 280 * yScale
+            let collapsedVideoGridTop = videoGridTop - albumCollapseDistance
             let gridGap: CGFloat = 3 * xScale
             let galleryCardWidth = (screenWidth - gridGap * 2) / 3
             let galleryCardHeight = galleryCardWidth * (184 / 138)
@@ -140,14 +142,14 @@ struct HomeView: View {
                         GeometryReader { proxy in
                             Color.clear.preference(
                                 key: HomeScrollOffsetPreferenceKey.self,
-                                value: proxy.frame(in: .global).minY
+                                value: proxy.frame(in: .named("home-scroll")).minY
                             )
                         }
                         .frame(width: screenWidth, height: 1)
 
                         ZStack(alignment: .topLeading) {
                             GallerySectionTitle(galleryTitle, xScale: xScale)
-                                .offset(x: 20 * xScale, y: 239 * yScale)
+                                .offset(x: 20 * xScale, y: collapsedGalleryTitleTop)
 
                             if isGalleryMode {
                                 LazyVGrid(
@@ -188,7 +190,7 @@ struct HomeView: View {
                                     }
                                 }
                                 .frame(width: screenWidth, alignment: .leading)
-                                .offset(y: videoGridTop)
+                                .offset(y: collapsedVideoGridTop)
                             } else {
                                 LazyVStack(spacing: timelineCardSpacing) {
                                     ForEach(visibleDiaries) { diary in
@@ -207,7 +209,7 @@ struct HomeView: View {
                                     }
                                 }
                                 .frame(width: cardWidth)
-                                .offset(x: phoneFrameLeft, y: videoGridTop)
+                                .offset(x: phoneFrameLeft, y: collapsedVideoGridTop)
                             }
                         }
                         .frame(width: screenWidth, height: scrollContentHeight, alignment: .topLeading)
@@ -414,7 +416,7 @@ struct HomeView: View {
             return
         }
 
-        if scrollDistance <= 6 {
+        if scrollDistance <= 0 {
             setAlbumCollapseProgress(0, animated: false)
             return
         }
