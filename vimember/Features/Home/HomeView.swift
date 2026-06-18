@@ -1,37 +1,80 @@
 import SwiftUI
 import SwiftData
 import UIKit
+import os
+
+private let homePerformanceLog = OSLog(
+    subsystem: "com.brycez021.vimember",
+    category: "HomePerformance"
+)
+
+private enum AlbumComposerMode: Equatable {
+    case add
+    case edit
+}
+
+private final class HomeScrollRuntime {
+    var currentAnchorY: CGFloat = 0
+    var anchorY: CGFloat?
+    var lastOffset: CGFloat?
+
+    func reset(anchorY: CGFloat? = nil) {
+        self.anchorY = anchorY
+        lastOffset = nil
+        if let anchorY {
+            currentAnchorY = anchorY
+        }
+    }
+}
 
 struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \VideoDiaryRecord.createdAt, order: .reverse) private var records: [VideoDiaryRecord]
 
     @State private var activeDiaryID: VideoDiary.ID?
+    @State private var isTimelinePlaybackSuspended = false
     @State private var pendingVisibilityTask: Task<Void, Never>?
+    @State private var galleryAssetBackfillTask: Task<Void, Never>?
     @State private var isGalleryMode = false
     @State private var isImportPresented = false
     @State private var selectedDiary: VideoDiary?
-    @State private var hiddenSampleIDs: Set<VideoDiary.ID> = []
-    @State private var sampleOverrides: [VideoDiary.ID: VideoDiary] = [:]
+    @State private var pendingDeleteDiary: VideoDiary?
+    @State private var editingDiary: VideoDiary?
+    @State private var sharePayload: VideoDiarySharePayload?
+    @State private var didStartSampleSeed = false
+    @State private var didStartBundledImportSeed = false
     @State private var albums: [VideoAlbum] = []
     @State private var selectedAlbumID: VideoAlbum.ID?
     @State private var editingAlbumID: VideoAlbum.ID?
+    @State private var pendingDeleteAlbumID: VideoAlbum.ID?
+    @State private var albumComposerMode: AlbumComposerMode = .add
+    @State private var albumComposerSourceFrame: CGRect?
+    @State private var albumComposerSourceCoverImageData: Data?
+    @State private var albumComposerSourceCoverDiary: VideoDiary?
     @State private var isAddAlbumComposerPresented = false
     @State private var isAddAlbumComposerContentVisible = false
     @State private var isAlbumVideoPickerPresented = false
+    @State private var isAlbumCoverPickerPresented = false
+    @State private var shouldReturnToAlbumComposerAfterVideoPicker = false
     @State private var draftAlbumName = ""
     @State private var selectedAlbumDiaryIDs: [VideoDiary.ID] = []
-    @State private var isAlbumHeaderHidden = false
-    @State private var lastHomeScrollOffset: CGFloat?
-    @State private var homeScrollAnchorY: CGFloat?
+    @State private var draftAlbumCoverImageData: Data?
+    @State private var albumCollapseProgress: CGFloat = 0
+    @State private var scrollRuntime = HomeScrollRuntime()
     @State private var addAlbumButtonFrame: CGRect?
+    @State private var albumFrames: [VideoAlbum.ID: CGRect] = [:]
+    @State private var isContentTitleVisibleBelowAlbumHeader = false
 
     private var diaries: [VideoDiary] {
-        records.map(\.diary) + VideoDiary.samples.compactMap { diary in
-            guard !hiddenSampleIDs.contains(diary.id) else { return nil }
-            return sampleOverrides[diary.id] ?? diary
-        }
+        records.map(\.diary)
     }
+
+    private static let sampleSeedDefaultsKey = "vimember.didSeedSampleVideoRecords.v1"
+    private static let bundledImportSeedDefaultsKey = "vimember.didSeedBundledImportedVideoRecords.v1"
+    private static let homeScrollTopID = "home-scroll-top"
+    private static let homeScrollTopThreshold: CGFloat = -6
+    private static let albumComposerOpenDelayNanoseconds: UInt64 = 16_000_000
+    private static let albumComposerResetDelayNanoseconds: UInt64 = 450_000_000
 
     var body: some View {
         GeometryReader { geometry in
@@ -53,35 +96,43 @@ struct HomeView: View {
             let bottomControlsBottomMargin: CGFloat = 28 * yScale
             let screenEdgeFadeHeight: CGFloat = 250 * yScale
             let albumTop: CGFloat = 121 * yScale
-            let albumHeaderOffsetY: CGFloat = isAlbumHeaderHidden ? -226 * yScale : 0
+            let albumHeaderHeight: CGFloat = 244 * yScale
+            let albumCollapseDistance = albumHeaderHeight * albumCollapseProgress
+            let albumHeaderOffsetY = -albumCollapseDistance
+            let selectedAlbumPointerTop: CGFloat = 147 * yScale + 104 * xScale - 21.5 * yScale
             let addAlbumFallbackCenter = CGPoint(
                 x: 55 * xScale,
-                y: albumHeaderOffsetY + 134 * yScale + 35 * xScale
+                y: albumHeaderOffsetY + 147 * yScale + 35 * xScale
             )
             let addAlbumShellFrame = CGRect(
                 x: 20 * xScale,
-                y: albumTop,
+                y: albumTop + 13 * yScale,
                 width: 380 * xScale,
                 height: 416 * yScale
             )
             let addAlbumContentFrame = CGRect(
                 x: 20 * xScale,
-                y: albumTop - 8 * yScale,
+                y: albumTop + 5 * yScale,
                 width: 380 * xScale,
                 height: 426 * yScale
             )
-            let videoGridTop: CGFloat = 280 * yScale
+            let videoGridTop: CGFloat = 287 * yScale
             let gridGap: CGFloat = 3 * xScale
             let galleryCardWidth = (screenWidth - gridGap * 2) / 3
             let galleryCardHeight = galleryCardWidth * (184 / 138)
             let selectedAlbum = albums.first { $0.id == selectedAlbumID }
-            let selectedFallbackDiary = selectedAlbum == nil ? diaries.first { $0.id == selectedAlbumID } : nil
-            let isAlbumFilterActive = selectedAlbum != nil || selectedFallbackDiary != nil
+            let isEditingAlbumComposer = albumComposerMode == .edit
+            let albumComposerCollapsedFrame = albumComposerSourceFrame
+                ?? (albums.isEmpty ? nil : addAlbumButtonFrame)
+            let addAlbumVisualCenter = addAlbumButtonFrame.map { frame in
+                CGPoint(x: frame.midX, y: frame.midY)
+            } ?? addAlbumFallbackCenter
+            let isAlbumFilterActive = selectedAlbum != nil
             let visibleDiaries = selectedAlbum.map { album in
                 album.diaryIDs.compactMap { diaryID in
                     diaries.first { $0.id == diaryID }
                 }
-            } ?? selectedFallbackDiary.map { [$0] } ?? diaries
+            } ?? diaries
             let viewModeSelection = Binding<ViewModeSelection>(
                 get: {
                     isGalleryMode ? .gallery : .timeline
@@ -90,18 +141,22 @@ struct HomeView: View {
                     switch nextSelection {
                     case .timeline:
                         isGalleryMode = false
-                        isAlbumHeaderHidden = false
+                        albumCollapseProgress = 0
+                        pendingVisibilityTask?.cancel()
+                        isTimelinePlaybackSuspended = false
                         resetHomeScrollTracking()
                         activeDiaryID = visibleDiaries.first?.id
                     case .gallery:
                         isGalleryMode = true
-                        isAlbumHeaderHidden = false
+                        albumCollapseProgress = 0
+                        pendingVisibilityTask?.cancel()
+                        isTimelinePlaybackSuspended = false
                         resetHomeScrollTracking()
                         activeDiaryID = nil
                     }
                 }
             )
-            let galleryTitle = selectedAlbum?.name ?? selectedFallbackDiary.map { fallbackAlbumTitle(for: $0) } ?? "All Videos"
+            let galleryTitle = selectedAlbum?.name ?? "All Videos"
             let galleryItemCount = visibleDiaries.count + (isAlbumFilterActive ? 1 : 0)
             let galleryRowCount = max(1, Int(ceil(Double(galleryItemCount) / 3.0)))
             let galleryContentHeight = max(
@@ -129,7 +184,14 @@ struct HomeView: View {
                     + 24 * yScale
             )
             let scrollContentHeight = isGalleryMode ? galleryContentHeight : timelineContentHeight
+            let selectedAlbumFrame = selectedAlbumID.flatMap { albumFrames[$0] }
+            let albumHeaderBottom = albumHeaderHeight + albumHeaderOffsetY
+            let shouldShowSelectedAlbumPointer = selectedAlbumID != nil
+                && selectedAlbumFrame != nil
+                && albumCollapseProgress < 1
+                && isContentTitleVisibleBelowAlbumHeader
 
+            ScrollViewReader { scrollProxy in
             ZStack(alignment: .topTrailing) {
                 Color.white.ignoresSafeArea()
 
@@ -138,14 +200,23 @@ struct HomeView: View {
                         GeometryReader { proxy in
                             Color.clear.preference(
                                 key: HomeScrollOffsetPreferenceKey.self,
-                                value: proxy.frame(in: .global).minY
+                                value: proxy.frame(in: .named("home-scroll")).minY
                             )
                         }
+                        .id(Self.homeScrollTopID)
                         .frame(width: screenWidth, height: 1)
 
                         ZStack(alignment: .topLeading) {
-                            GallerySectionTitle(galleryTitle, xScale: xScale)
-                                .offset(x: 20 * xScale, y: 239 * yScale)
+                            CalligraphSectionTitle(galleryTitle, xScale: xScale)
+                                .background {
+                                    GeometryReader { proxy in
+                                        Color.clear.preference(
+                                            key: HomeContentTitleFramePreferenceKey.self,
+                                            value: proxy.frame(in: .named(GalleryAddAlbumMorphCoordinateSpace.name))
+                                        )
+                                    }
+                                }
+                                .offset(x: 20 * xScale, y: 251 * yScale)
 
                             if isGalleryMode {
                                 LazyVGrid(
@@ -165,8 +236,6 @@ struct HomeView: View {
                                             onTap: {
                                                 if let selectedAlbum {
                                                     showAlbumVideoPicker(for: selectedAlbum)
-                                                } else if let selectedFallbackDiary {
-                                                    showAlbumVideoPicker(forFallbackDiary: selectedFallbackDiary)
                                                 }
                                             }
                                         )
@@ -174,15 +243,40 @@ struct HomeView: View {
 
                                     ForEach(Array(visibleDiaries.enumerated()), id: \.element.id) { index, diary in
                                         let cardIndex = isAlbumFilterActive ? index + 1 : index
-                                        GalleryVideoCard(
+                                        HomeContextMenuCard(
                                             diary: diary,
-                                            width: galleryCardWidth,
-                                            height: galleryCardHeight,
-                                            column: cardIndex % 3,
-                                            onTap: {
-                                                selectedDiary = diary
+                                            contentRevision: galleryContextMenuRevision(
+                                                diary: diary,
+                                                width: galleryCardWidth,
+                                                height: galleryCardHeight,
+                                                column: cardIndex % 3
+                                            ),
+                                            sourceCornerRadius: 0,
+                                            previewTopShadowOpacity: 0.12,
+                                            onDelete: { diary in
+                                                pendingDeleteDiary = diary
+                                            },
+                                            onShareVideo: { diary in
+                                                shareDiaryVideo(diary)
+                                            },
+                                            onShareNote: { diary in
+                                                shareDiaryNote(diary)
+                                            },
+                                            onEdit: { diary in
+                                                editDiaryFromHome(diary)
                                             }
-                                        )
+                                        ) {
+                                            GalleryVideoCard(
+                                                diary: diary,
+                                                width: galleryCardWidth,
+                                                height: galleryCardHeight,
+                                                column: cardIndex % 3,
+                                                onTap: {
+                                                    selectedDiary = diary
+                                                }
+                                            )
+                                        }
+                                        .frame(width: galleryCardWidth, height: galleryCardHeight)
                                     }
                                 }
                                 .frame(width: screenWidth, alignment: .leading)
@@ -190,18 +284,48 @@ struct HomeView: View {
                             } else {
                                 LazyVStack(spacing: timelineCardSpacing) {
                                     ForEach(visibleDiaries) { diary in
-                                        VideoDiaryCard(
+                                        let videoHeight = cardWidth / max(diary.displayAspectRatio, 0.1)
+                                        let colorBlockOverflow = diary.isLandscapeVideo ? cardWidth * (86 / 420) : 0
+                                        let cardHeight = videoHeight + colorBlockOverflow
+                                        let isDiaryActive = !isTimelinePlaybackSuspended && activeDiaryID == diary.id
+
+                                        HomeContextMenuCard(
                                             diary: diary,
-                                            albumTagTitles: albumTagTitles(for: diary),
-                                            width: cardWidth,
-                                            isActive: activeDiaryID == diary.id
-                                        )
+                                            contentRevision: timelineContextMenuRevision(
+                                                diary: diary,
+                                                width: cardWidth,
+                                                isActive: isDiaryActive
+                                            ),
+                                            sourceCornerRadius: 0,
+                                            onDelete: { diary in
+                                                pendingDeleteDiary = diary
+                                            },
+                                            onShareVideo: { diary in
+                                                shareDiaryVideo(diary)
+                                            },
+                                            onShareNote: { diary in
+                                                shareDiaryNote(diary)
+                                            },
+                                            onEdit: { diary in
+                                                editDiaryFromHome(diary)
+                                            }
+                                        ) {
+                                            VideoDiaryCard(
+                                                diary: diary,
+                                                width: cardWidth,
+                                                isActive: isDiaryActive
+                                            )
+                                            .contentShape(Rectangle())
+                                            .onTapGesture {
+                                                pendingVisibilityTask?.cancel()
+                                                isTimelinePlaybackSuspended = false
+                                                activeDiaryID = nil
+                                                selectedDiary = diary
+                                            }
+                                        }
+                                        .frame(width: cardWidth, height: cardHeight)
                                         .id(diary.id)
                                         .background(VisibilityReporter(id: diary.id))
-                                        .onTapGesture {
-                                            activeDiaryID = nil
-                                            selectedDiary = diary
-                                        }
                                     }
                                 }
                                 .frame(width: cardWidth)
@@ -217,13 +341,17 @@ struct HomeView: View {
                     scheduleActiveCardUpdate(frames: frames, viewport: viewport)
                 }
                 .onPreferenceChange(HomeScrollOffsetPreferenceKey.self) { scrollOffset in
-                    updateAlbumHeaderVisibility(scrollOffset: scrollOffset)
+                    updateAlbumCollapseProgress(
+                        scrollOffset: scrollOffset,
+                        albumHeaderHeight: albumHeaderHeight
+                    )
                 }
 
                 HomeAlbumHeader(
                     diaries: diaries,
                     albums: albums,
                     selectedAlbumID: selectedAlbumID,
+                    hiddenAlbumID: isEditingAlbumComposer ? editingAlbumID : nil,
                     screenWidth: screenWidth,
                     xScale: xScale,
                     yScale: yScale,
@@ -231,14 +359,39 @@ struct HomeView: View {
                         showAddAlbumComposer()
                     },
                     onSelectAlbum: { albumID in
-                        showSelectedAlbum(albumID)
+                        showSelectedAlbum(albumID, scrollProxy: scrollProxy)
+                    },
+                    onLongPressAlbum: { albumID in
+                        showEditAlbumComposer(for: albumID)
                     }
                 )
-                .frame(width: screenWidth, height: 226 * yScale, alignment: .topLeading)
-                .offset(y: isAlbumHeaderHidden ? -226 * yScale : 0)
+                .frame(width: screenWidth, height: albumHeaderHeight, alignment: .topLeading)
+                .offset(y: albumHeaderOffsetY)
                 .zIndex(2)
 
-                ViewModeSwitch(selection: viewModeSelection, xScale: xScale)
+                if let selectedAlbumFrame {
+                    GallerySelectedAlbumPointer()
+                        .fill(Color(red: 0.996, green: 0.996, blue: 0.996))
+                        .frame(width: 30 * xScale, height: 26 * xScale)
+                        .mask(alignment: .top) {
+                            Rectangle()
+                                .frame(width: 30 * xScale, height: 14 * xScale)
+                        }
+                        .position(
+                            x: selectedAlbumFrame.midX,
+                            y: selectedAlbumPointerTop + 13 * xScale + albumHeaderOffsetY
+                        )
+                        .opacity(shouldShowSelectedAlbumPointer ? 1 - albumCollapseProgress : 0)
+                        .transaction { transaction in
+                            transaction.animation = nil
+                            transaction.disablesAnimations = true
+                        }
+                        .transition(.identity)
+                        .allowsHitTesting(false)
+                        .zIndex(2.5)
+                }
+
+                LiquidGlassDisplayModeToggle(selection: viewModeSelection, xScale: xScale)
                 .position(
                     x: screenWidth - 20 * xScale - 50 * xScale,
                     y: 68 * yScale + 22 * xScale
@@ -262,6 +415,7 @@ struct HomeView: View {
                     gap: bottomControlsGap,
                     isSearchVisible: false,
                     addAction: {
+                        os_signpost(.event, log: homePerformanceLog, name: "Home Open Import")
                         isImportPresented = true
                     }
                 )
@@ -271,11 +425,33 @@ struct HomeView: View {
                     )
                     .zIndex(2)
 
+                if isEditingAlbumComposer {
+                    HomeCollapsedAddAlbumVisual(xScale: xScale)
+                        .position(addAlbumVisualCenter)
+                        .allowsHitTesting(false)
+                        .zIndex(2.9)
+                }
+
+                if isAddAlbumComposerPresented {
+                    Color.black.opacity(0.001)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            closeAddAlbumFlow()
+                        }
+                        .zIndex(2.8)
+                }
+
                 GalleryAlbumAddMorphOverlay(
                     name: $draftAlbumName,
+                    coverImageData: draftAlbumCoverImageData,
+                    coverDiary: isEditingAlbumComposer ? albumComposerSourceCoverDiary : nil,
+                    collapsedAlbumCoverImageData: albumComposerSourceCoverImageData,
+                    collapsedAlbumCoverDiary: albumComposerSourceCoverDiary,
+                    title: isEditingAlbumComposer ? "Edit Album" : "New Album",
+                    leadingAction: isEditingAlbumComposer ? .delete : .close,
                     isExpanded: isAddAlbumComposerPresented,
                     contentOpacity: isAddAlbumComposerContentVisible ? 1 : 0,
-                    collapsedFrame: addAlbumButtonFrame,
+                    collapsedFrame: albumComposerCollapsedFrame,
                     fallbackCollapsedCenter: addAlbumFallbackCenter,
                     expandedShellFrame: addAlbumShellFrame,
                     expandedContentFrame: addAlbumContentFrame,
@@ -284,8 +460,16 @@ struct HomeView: View {
                     onClose: {
                         closeAddAlbumFlow()
                     },
+                    onPickCover: {
+                        showAlbumCoverPicker()
+                    },
                     onNext: {
                         showAlbumVideoPicker()
+                    },
+                    onDelete: {
+                        if let editingAlbumID {
+                            pendingDeleteAlbumID = editingAlbumID
+                        }
                     }
                 )
                 .frame(width: screenWidth, height: screenHeight, alignment: .topLeading)
@@ -297,15 +481,16 @@ struct HomeView: View {
                         albumName: draftAlbumName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "New Album" : draftAlbumName,
                         selectedDiaryIDs: $selectedAlbumDiaryIDs,
                         onBack: {
+                            let shouldReturnToComposer = shouldReturnToAlbumComposerAfterVideoPicker
                             withAnimation(.snappy(duration: 0.28)) {
                                 isAlbumVideoPickerPresented = false
-                                isAddAlbumComposerPresented = editingAlbumID == nil
+                                isAddAlbumComposerPresented = shouldReturnToComposer
                                 isAddAlbumComposerContentVisible = false
                             }
-                            if editingAlbumID != nil {
-                                closeAddAlbumFlow()
-                            } else {
+                            if shouldReturnToComposer {
                                 revealAddAlbumComposerContent()
+                            } else {
+                                closeAddAlbumFlow()
                             }
                         },
                         onSave: {
@@ -315,12 +500,23 @@ struct HomeView: View {
                     .transition(.opacity)
                     .zIndex(4)
                 }
+
+                if isAlbumCoverPickerPresented {
+                    GalleryAlbumCoverPicker(
+                        onBack: {
+                            closeAlbumCoverPicker()
+                        },
+                        onSelectCover: { imageData in
+                            draftAlbumCoverImageData = imageData
+                            closeAlbumCoverPicker()
+                        }
+                    )
+                    .transition(.opacity)
+                    .zIndex(5)
+                }
             }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 6, coordinateSpace: .global)
-                    .onChanged { value in
-                        updateAlbumHeaderVisibility(dragTranslation: value.translation)
-                    }
                     .onEnded { value in
                         exitSelectedAlbumIfNeeded(
                             dragValue: value,
@@ -332,22 +528,75 @@ struct HomeView: View {
             .onPreferenceChange(GalleryAddAlbumFramePreferenceKey.self) { frame in
                 addAlbumButtonFrame = frame
             }
+            .onPreferenceChange(GalleryAlbumFramePreferenceKey.self) { frames in
+                albumFrames = frames
+            }
+            .onPreferenceChange(HomeContentTitleFramePreferenceKey.self) { frame in
+                updateContentTitleVisibility(
+                    frame: frame,
+                    albumHeaderBottom: albumHeaderBottom,
+                    screenHeight: screenHeight
+                )
+            }
             .ignoresSafeArea()
             .animation(.snappy(duration: 0.24), value: isGalleryMode)
             .animation(.snappy(duration: 0.32), value: isAddAlbumComposerPresented)
             .animation(.snappy(duration: 0.24), value: isAlbumVideoPickerPresented)
-            .animation(.snappy(duration: 0.26), value: isAlbumHeaderHidden)
+            .animation(.snappy(duration: 0.24), value: isAlbumCoverPickerPresented)
             .onAppear {
+                os_signpost(.event, log: homePerformanceLog, name: "Home Appeared")
+                isTimelinePlaybackSuspended = false
                 activeDiaryID = isGalleryMode ? nil : visibleDiaries.first?.id
+                seedSampleAlbumsIfNeeded()
+            }
+            .task {
+                let signpostID = OSSignpostID(log: homePerformanceLog)
+                os_signpost(.begin, log: homePerformanceLog, name: "Home Seed Videos", signpostID: signpostID)
+                await seedSampleVideoRecordsIfNeeded()
+                await seedBundledImportedVideoRecordsIfNeeded()
+                os_signpost(.end, log: homePerformanceLog, name: "Home Seed Videos", signpostID: signpostID)
+                seedSampleAlbumsIfNeeded()
+                scheduleGalleryAssetBackfill(for: records.map(\.diary))
             }
             .onChange(of: diaries.first?.id) { _, _ in
+                isTimelinePlaybackSuspended = false
                 activeDiaryID = isGalleryMode ? nil : visibleDiaries.first?.id
             }
+            .onChange(of: records.map(\.id)) { _, _ in
+                seedSampleAlbumsIfNeeded()
+                scheduleGalleryAssetBackfill(for: records.map(\.diary))
+            }
             .onChange(of: selectedAlbumID) { _, _ in
+                isTimelinePlaybackSuspended = false
                 activeDiaryID = isGalleryMode ? nil : visibleDiaries.first?.id
             }
             .fullScreenCover(isPresented: $isImportPresented) {
                 AddVideoFlowView()
+            }
+            .sheet(item: $sharePayload) { payload in
+                VideoDiaryShareSheet(activityItems: payload.activityItems)
+            }
+            .alert("Delete this video diary?", isPresented: deleteConfirmationBinding) {
+                Button("Delete", role: .destructive) {
+                    confirmPendingDelete()
+                }
+
+                Button("Cancel", role: .cancel) {
+                    pendingDeleteDiary = nil
+                }
+            } message: {
+                Text("This removes the local diary and copied video from vimember. It does not delete the original video in Photos.")
+            }
+            .alert(deleteAlbumConfirmationTitle, isPresented: deleteAlbumConfirmationBinding) {
+                Button("Delete Album", role: .destructive) {
+                    confirmPendingAlbumDelete()
+                }
+
+                Button("Cancel", role: .cancel) {
+                    pendingDeleteAlbumID = nil
+                }
+            } message: {
+                Text("Videos in this album will stay in All Videos.")
             }
             .fullScreenCover(item: $selectedDiary, onDismiss: {
                 activeDiaryID = isGalleryMode ? nil : visibleDiaries.first?.id
@@ -362,104 +611,459 @@ struct HomeView: View {
                     }
                 )
             }
+            .fullScreenCover(item: $editingDiary, onDismiss: {
+                activeDiaryID = isGalleryMode ? nil : visibleDiaries.first?.id
+            }) { diary in
+                EditVideoDiaryFlowView(diary: diary) { title, body in
+                    _ = try await saveEditedDiary(
+                        diary: diary,
+                        title: title,
+                        body: body,
+                        presentDetailAfterSave: false
+                    )
+                }
+            }
+            }
         }
+    }
+
+    private var deleteConfirmationBinding: Binding<Bool> {
+        Binding(
+            get: {
+                pendingDeleteDiary != nil
+            },
+            set: { isPresented in
+                if !isPresented {
+                    pendingDeleteDiary = nil
+                }
+            }
+        )
+    }
+
+    private var deleteAlbumConfirmationBinding: Binding<Bool> {
+        Binding(
+            get: {
+                pendingDeleteAlbumID != nil
+            },
+            set: { isPresented in
+                if !isPresented {
+                    pendingDeleteAlbumID = nil
+                }
+            }
+        )
+    }
+
+    private var deleteAlbumConfirmationTitle: String {
+        guard
+            let pendingDeleteAlbumID,
+            let album = albums.first(where: { $0.id == pendingDeleteAlbumID })
+        else {
+            return "Delete Album?"
+        }
+
+        return "Delete “\(album.name)”?"
+    }
+
+    @MainActor
+    private func confirmPendingDelete() {
+        guard let diary = pendingDeleteDiary else {
+            return
+        }
+
+        pendingDeleteDiary = nil
+        Task {
+            try? await deleteDiary(diary)
+        }
+    }
+
+    @MainActor
+    private func confirmPendingAlbumDelete() {
+        guard let albumID = pendingDeleteAlbumID else {
+            return
+        }
+
+        pendingDeleteAlbumID = nil
+        withAnimation(.snappy(duration: 0.24)) {
+            isAddAlbumComposerContentVisible = false
+            isAddAlbumComposerPresented = false
+            isAlbumVideoPickerPresented = false
+            isAlbumCoverPickerPresented = false
+            albums.removeAll { $0.id == albumID }
+            if selectedAlbumID == albumID {
+                selectedAlbumID = nil
+            }
+        }
+
+        resetAlbumComposerDraftAfterCollapse()
+    }
+
+    @MainActor
+    private func shareDiaryVideo(_ diary: VideoDiary) {
+        guard let videoURL = diary.videoURL else {
+            return
+        }
+
+        sharePayload = VideoDiarySharePayload(activityItems: [
+            VideoDiaryVideoActivityItemSource(url: videoURL)
+        ])
+    }
+
+    @MainActor
+    private func shareDiaryNote(_ diary: VideoDiary) {
+        Task { @MainActor in
+            let textImage = await VideoDiaryShareImageRenderer.makeImage(for: diary)
+            sharePayload = VideoDiarySharePayload(activityItems: [
+                VideoDiaryTextImageActivityItemSource(image: textImage)
+            ])
+        }
+    }
+
+    @MainActor
+    private func editDiaryFromHome(_ diary: VideoDiary) {
+        pendingVisibilityTask?.cancel()
+        isTimelinePlaybackSuspended = false
+        activeDiaryID = nil
+        selectedDiary = nil
+        editingDiary = diary
     }
 
     private func scheduleActiveCardUpdate(frames: [VideoDiary.ID: CGRect], viewport: CGSize) {
         pendingVisibilityTask?.cancel()
 
-        let candidates = frames
-            .filter { _, frame in frame.maxY > 0 && frame.minY < viewport.height }
-            .map { id, frame -> (VideoDiary.ID, CGFloat) in
-                let visibleHeight = min(frame.maxY, viewport.height) - max(frame.minY, 0)
-                let centerDistance = abs(frame.midY - viewport.height * 0.52)
-                return (id, centerDistance - visibleHeight * 0.35)
-            }
-            .sorted { $0.1 < $1.1 }
+        var bestID: VideoDiary.ID?
+        var bestScore = CGFloat.greatestFiniteMagnitude
+        let targetY = viewport.height * 0.52
 
-        guard let bestID = candidates.first?.0 else {
+        for (id, frame) in frames {
+            guard frame.maxY > 0, frame.minY < viewport.height else {
+                continue
+            }
+
+            let visibleHeight = min(frame.maxY, viewport.height) - max(frame.minY, 0)
+            let centerDistance = abs(frame.midY - targetY)
+            let score = centerDistance - visibleHeight * 0.35
+
+            if score < bestScore {
+                bestScore = score
+                bestID = id
+            }
+        }
+
+        guard let bestID else {
             return
         }
 
-        activeDiaryID = nil
+        if !isTimelinePlaybackSuspended {
+            isTimelinePlaybackSuspended = true
+        }
+
         pendingVisibilityTask = Task {
             try? await Task.sleep(nanoseconds: 160_000_000)
             guard !Task.isCancelled else { return }
             await MainActor.run {
+                os_signpost(.event, log: homePerformanceLog, name: "Home Active Video")
                 activeDiaryID = bestID
+                isTimelinePlaybackSuspended = false
             }
         }
     }
 
     @MainActor
-    private func updateAlbumHeaderVisibility(dragTranslation: CGSize) {
-        guard !isAddAlbumComposerPresented && !isAlbumVideoPickerPresented else {
-            return
-        }
+    private func scheduleGalleryAssetBackfill(for diaries: [VideoDiary]) {
+        galleryAssetBackfillTask?.cancel()
 
-        guard abs(dragTranslation.height) > abs(dragTranslation.width) else {
-            return
-        }
-
-        if dragTranslation.height < -10 {
-            isAlbumHeaderHidden = true
-        } else if dragTranslation.height > 6 {
-            isAlbumHeaderHidden = false
+        let snapshot = diaries
+        galleryAssetBackfillTask = Task(priority: .utility) {
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard !Task.isCancelled else { return }
+            await VideoDerivedAssetStore.shared.prepareGalleryAssets(for: snapshot)
         }
     }
 
     @MainActor
-    private func updateAlbumHeaderVisibility(scrollOffset anchorY: CGFloat) {
-        guard !isAddAlbumComposerPresented && !isAlbumVideoPickerPresented else {
+    private func updateAlbumCollapseProgress(scrollOffset anchorY: CGFloat, albumHeaderHeight: CGFloat) {
+        scrollRuntime.currentAnchorY = anchorY
+
+        guard !isAddAlbumComposerPresented && !isAlbumVideoPickerPresented && !isAlbumCoverPickerPresented else {
             resetHomeScrollTracking(anchorY: anchorY)
             return
         }
 
-        if homeScrollAnchorY == nil {
-            homeScrollAnchorY = anchorY
-        }
+        let lastAnchorY = scrollRuntime.lastOffset
+        scrollRuntime.lastOffset = anchorY
 
-        let scrollOffset = anchorY - (homeScrollAnchorY ?? anchorY)
-
-        defer {
-            lastHomeScrollOffset = scrollOffset
-        }
-
-        guard let lastHomeScrollOffset else {
-            isAlbumHeaderHidden = false
+        if anchorY >= Self.homeScrollTopThreshold {
+            setAlbumCollapseProgress(0, animated: false)
             return
         }
 
-        if scrollOffset > -6 {
-            isAlbumHeaderHidden = false
+        if let lastAnchorY, anchorY > lastAnchorY {
+            setAlbumCollapseProgress(0, animated: true)
             return
         }
 
-        let delta = scrollOffset - lastHomeScrollOffset
-        if delta < -8, scrollOffset < -18 {
-            isAlbumHeaderHidden = true
-        } else if delta > 4 {
-            isAlbumHeaderHidden = false
-        }
+        let nextProgress = -anchorY / max(albumHeaderHeight, 1)
+        setAlbumCollapseProgress(nextProgress, animated: false)
     }
 
     @MainActor
     private func resetHomeScrollTracking(anchorY: CGFloat? = nil) {
-        homeScrollAnchorY = anchorY
-        lastHomeScrollOffset = nil
+        scrollRuntime.reset(anchorY: anchorY)
+    }
+
+    @MainActor
+    private func setAlbumCollapseProgress(_ progress: CGFloat, animated: Bool) {
+        let clampedProgress = min(max(progress, 0), 1)
+        guard abs(albumCollapseProgress - clampedProgress) > 0.001 else {
+            return
+        }
+
+        if animated {
+            withAnimation(.snappy(duration: 0.2)) {
+                albumCollapseProgress = clampedProgress
+            }
+        } else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            transaction.animation = nil
+            withTransaction(transaction) {
+                albumCollapseProgress = clampedProgress
+            }
+        }
+    }
+
+    @MainActor
+    private func updateContentTitleVisibility(frame: CGRect?, albumHeaderBottom: CGFloat, screenHeight: CGFloat) {
+        let nextValue = frame.map { frame in
+            frame.minY >= albumHeaderBottom - 1
+                && frame.maxY > albumHeaderBottom
+                && frame.minY < screenHeight
+        } ?? false
+
+        guard isContentTitleVisibleBelowAlbumHeader != nextValue else {
+            return
+        }
+
+        isContentTitleVisibleBelowAlbumHeader = nextValue
+    }
+
+    @MainActor
+    private func seedSampleVideoRecordsIfNeeded() async {
+        guard !didStartSampleSeed else {
+            return
+        }
+
+        let signpostID = OSSignpostID(log: homePerformanceLog)
+        os_signpost(.begin, log: homePerformanceLog, name: "Home Seed Sample Videos", signpostID: signpostID)
+        defer {
+            os_signpost(.end, log: homePerformanceLog, name: "Home Seed Sample Videos", signpostID: signpostID)
+        }
+
+        didStartSampleSeed = true
+
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: Self.sampleSeedDefaultsKey) else {
+            return
+        }
+
+        var existingSourceIDs = Set(records.compactMap(\.sourceAssetIdentifier))
+        var didFail = false
+        var copiedFilenames: [String] = []
+
+        for seed in SampleVideoDiarySeed.all {
+            let sourceID = seed.sourceAssetIdentifier
+            guard !existingSourceIDs.contains(sourceID) else {
+                continue
+            }
+
+            guard let sourceURL = Bundle.main.url(forResource: seed.videoResource, withExtension: "mp4") else {
+                didFail = true
+                continue
+            }
+
+            do {
+                let filename = try await VideoFileStore.copyVideo(from: sourceURL)
+                let fallbackRGB = rgbComponents(from: seed.fallbackTint)
+                let createdAt = seed.createdAt
+                let record = VideoDiaryRecord(
+                    title: seed.title,
+                    body: seed.body,
+                    createdAt: createdAt,
+                    updatedAt: createdAt,
+                    localVideoFilename: filename,
+                    sourceAssetIdentifier: sourceID,
+                    displayAspectRatio: Double(seed.displayAspectRatio),
+                    fallbackRed: fallbackRGB.red,
+                    fallbackGreen: fallbackRGB.green,
+                    fallbackBlue: fallbackRGB.blue
+                )
+
+                modelContext.insert(record)
+                existingSourceIDs.insert(sourceID)
+                copiedFilenames.append(filename)
+            } catch {
+                didFail = true
+            }
+        }
+
+        do {
+            try modelContext.save()
+            if !didFail {
+                defaults.set(true, forKey: Self.sampleSeedDefaultsKey)
+            }
+        } catch {
+            for filename in copiedFilenames {
+                try? await VideoFileStore.deleteVideo(named: filename)
+            }
+        }
+    }
+
+    @MainActor
+    private func seedBundledImportedVideoRecordsIfNeeded() async {
+        guard !didStartBundledImportSeed else {
+            return
+        }
+
+        let signpostID = OSSignpostID(log: homePerformanceLog)
+        os_signpost(.begin, log: homePerformanceLog, name: "Home Seed Bundled Videos", signpostID: signpostID)
+        defer {
+            os_signpost(.end, log: homePerformanceLog, name: "Home Seed Bundled Videos", signpostID: signpostID)
+        }
+
+        didStartBundledImportSeed = true
+
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: Self.bundledImportSeedDefaultsKey) else {
+            return
+        }
+
+        var existingSourceIDs = Set(records.compactMap(\.sourceAssetIdentifier))
+        var didFail = false
+        var copiedFilenames: [String] = []
+
+        for seed in BundledImportedVideoDiarySeed.all {
+            let sourceID = seed.sourceAssetIdentifier
+            guard !existingSourceIDs.contains(sourceID) else {
+                continue
+            }
+
+            guard let sourceURL = Bundle.main.url(
+                forResource: seed.videoResource,
+                withExtension: "mp4",
+                subdirectory: BundledImportedVideoDiarySeed.resourceSubdirectory
+            ) else {
+                didFail = true
+                continue
+            }
+
+            do {
+                let filename = try await VideoFileStore.copyVideo(from: sourceURL)
+                let fallbackRGB = rgbComponents(from: seed.fallbackTint)
+                let createdAt = seed.createdAt
+                let record = VideoDiaryRecord(
+                    title: seed.title,
+                    body: seed.body,
+                    createdAt: createdAt,
+                    updatedAt: createdAt,
+                    localVideoFilename: filename,
+                    sourceAssetIdentifier: sourceID,
+                    displayAspectRatio: Double(seed.displayAspectRatio),
+                    fallbackRed: fallbackRGB.red,
+                    fallbackGreen: fallbackRGB.green,
+                    fallbackBlue: fallbackRGB.blue
+                )
+
+                modelContext.insert(record)
+                existingSourceIDs.insert(sourceID)
+                copiedFilenames.append(filename)
+            } catch {
+                didFail = true
+            }
+        }
+
+        do {
+            try modelContext.save()
+            if !didFail {
+                defaults.set(true, forKey: Self.bundledImportSeedDefaultsKey)
+            }
+        } catch {
+            for filename in copiedFilenames {
+                try? await VideoFileStore.deleteVideo(named: filename)
+            }
+        }
+    }
+
+    private func rgbComponents(from color: Color) -> (red: Double, green: Double, blue: Double) {
+        let uiColor = UIColor(color)
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+
+        guard uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return (0.47, 0.64, 0.84)
+        }
+
+        return (Double(red), Double(green), Double(blue))
+    }
+
+    private func albumCoverDiary(for album: VideoAlbum) -> VideoDiary? {
+        album.coverDiaryID.flatMap { coverID in
+            diaries.first { $0.id == coverID }
+        } ?? album.diaryIDs.compactMap { diaryID in
+            diaries.first { $0.id == diaryID }
+        }.first
+    }
+
+    @MainActor
+    private func seedSampleAlbumsIfNeeded() {
+        let recordsBySourceID = Dictionary(
+            records.compactMap { record -> (String, VideoDiaryRecord)? in
+                guard let sourceAssetIdentifier = record.sourceAssetIdentifier else {
+                    return nil
+                }
+
+                return (sourceAssetIdentifier, record)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var existingAlbumIDs = Set(albums.map(\.id))
+        var nextAlbums = albums
+
+        for seed in SampleVideoDiarySeed.all {
+            guard
+                !existingAlbumIDs.contains(seed.albumID),
+                let record = recordsBySourceID[seed.sourceAssetIdentifier]
+            else {
+                continue
+            }
+
+            nextAlbums.append(
+                VideoAlbum(
+                    id: seed.albumID,
+                    name: seed.albumTitle,
+                    diaryIDs: [record.id],
+                    coverDiaryID: record.id,
+                    createdAt: record.createdAt
+                )
+            )
+            existingAlbumIDs.insert(seed.albumID)
+        }
+
+        if nextAlbums != albums {
+            albums = nextAlbums
+        }
     }
 
     @MainActor
     private func deleteDiary(_ diary: VideoDiary) async throws {
-        if let record = records.first(where: { $0.id == diary.id }) {
-            try await VideoFileStore.deleteVideo(named: record.localVideoFilename)
-            modelContext.delete(record)
-            try modelContext.save()
-        } else {
-            hiddenSampleIDs.insert(diary.id)
-            sampleOverrides[diary.id] = nil
+        guard let record = records.first(where: { $0.id == diary.id }) else {
+            return
         }
 
+        try await VideoFileStore.deleteVideo(named: record.localVideoFilename)
+        modelContext.delete(record)
+        try modelContext.save()
         removeDiaryFromAlbums(diary.id)
 
         selectedDiary = nil
@@ -469,7 +1073,12 @@ struct HomeView: View {
     }
 
     @MainActor
-    private func saveEditedDiary(diary: VideoDiary, title: String, body: String) async throws -> VideoDiary {
+    private func saveEditedDiary(
+        diary: VideoDiary,
+        title: String,
+        body: String,
+        presentDetailAfterSave: Bool = true
+    ) async throws -> VideoDiary {
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalTitle = trimmedTitle.isEmpty ? "Title" : trimmedTitle
 
@@ -480,18 +1089,22 @@ struct HomeView: View {
             try modelContext.save()
 
             let updatedDiary = record.diary
-            selectedDiary = updatedDiary
+            if presentDetailAfterSave {
+                selectedDiary = updatedDiary
+            }
             return updatedDiary
         }
 
-        let updatedDiary = diary.replacingText(title: finalTitle, body: body)
-        sampleOverrides[diary.id] = updatedDiary
-        selectedDiary = updatedDiary
-        return updatedDiary
+        return diary
     }
 
     @MainActor
-    private func createAlbum(id: VideoAlbum.ID = UUID(), name: String, diaryIDs: [VideoDiary.ID]) {
+    private func createAlbum(
+        id: VideoAlbum.ID = UUID(),
+        name: String,
+        diaryIDs: [VideoDiary.ID],
+        coverImageData: Data?
+    ) {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalName = trimmedName.isEmpty ? "New Album" : trimmedName
         let orderedIDs = diaryIDs.reduce(into: [VideoDiary.ID]()) { result, id in
@@ -508,7 +1121,8 @@ struct HomeView: View {
                 id: id,
                 name: finalName,
                 diaryIDs: orderedIDs,
-                coverDiaryID: coverID
+                coverDiaryID: coverID,
+                coverImageData: coverImageData
             ),
             at: 0
         )
@@ -516,24 +1130,82 @@ struct HomeView: View {
 
     @MainActor
     private func showAddAlbumComposer() {
+        albumComposerMode = .add
+        albumComposerSourceFrame = albums.isEmpty ? nil : addAlbumButtonFrame
+        albumComposerSourceCoverImageData = nil
+        albumComposerSourceCoverDiary = nil
         draftAlbumName = ""
         selectedAlbumDiaryIDs = []
+        draftAlbumCoverImageData = nil
         editingAlbumID = nil
+        shouldReturnToAlbumComposerAfterVideoPicker = false
         withAnimation(.snappy(duration: 0.32)) {
             isAddAlbumComposerContentVisible = false
-            isAlbumHeaderHidden = false
+            albumCollapseProgress = 0
             isAddAlbumComposerPresented = true
             isAlbumVideoPickerPresented = false
+            isAlbumCoverPickerPresented = false
         }
         revealAddAlbumComposerContent()
     }
 
     @MainActor
+    private func showEditAlbumComposer(for albumID: VideoAlbum.ID) {
+        guard
+            let album = albums.first(where: { $0.id == albumID }),
+            let sourceFrame = albumFrames[albumID].map(albumCoverFrame(from:))
+        else {
+            return
+        }
+
+        albumComposerMode = .edit
+        albumComposerSourceFrame = sourceFrame
+        albumComposerSourceCoverImageData = album.coverImageData
+        albumComposerSourceCoverDiary = albumCoverDiary(for: album)
+        draftAlbumName = album.name
+        selectedAlbumDiaryIDs = album.diaryIDs
+        draftAlbumCoverImageData = album.coverImageData
+        editingAlbumID = albumID
+        pendingDeleteAlbumID = nil
+        shouldReturnToAlbumComposerAfterVideoPicker = false
+        isAddAlbumComposerContentVisible = false
+        albumCollapseProgress = 0
+        isAddAlbumComposerPresented = false
+        isAlbumVideoPickerPresented = false
+        isAlbumCoverPickerPresented = false
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.albumComposerOpenDelayNanoseconds)
+            withAnimation(.snappy(duration: 0.32)) {
+                isAddAlbumComposerPresented = true
+            }
+            revealAddAlbumComposerContent()
+        }
+    }
+
+    @MainActor
     private func showAlbumVideoPicker() {
+        shouldReturnToAlbumComposerAfterVideoPicker = true
         withAnimation(.snappy(duration: 0.28)) {
             isAddAlbumComposerContentVisible = false
+            albumCollapseProgress = 0
             isAddAlbumComposerPresented = false
+            isAlbumCoverPickerPresented = false
             isAlbumVideoPickerPresented = true
+        }
+    }
+
+    @MainActor
+    private func showAlbumCoverPicker() {
+        withAnimation(.snappy(duration: 0.24)) {
+            isAlbumCoverPickerPresented = true
+        }
+    }
+
+    @MainActor
+    private func closeAlbumCoverPicker() {
+        withAnimation(.snappy(duration: 0.24)) {
+            isAlbumCoverPickerPresented = false
         }
     }
 
@@ -541,40 +1213,37 @@ struct HomeView: View {
     private func showAlbumVideoPicker(for album: VideoAlbum) {
         draftAlbumName = album.name
         selectedAlbumDiaryIDs = album.diaryIDs
+        draftAlbumCoverImageData = album.coverImageData
         editingAlbumID = album.id
+        shouldReturnToAlbumComposerAfterVideoPicker = false
         withAnimation(.snappy(duration: 0.28)) {
             isAddAlbumComposerContentVisible = false
-            isAlbumHeaderHidden = false
+            albumCollapseProgress = 0
             isAddAlbumComposerPresented = false
+            isAlbumCoverPickerPresented = false
             isAlbumVideoPickerPresented = true
         }
     }
 
     @MainActor
-    private func showAlbumVideoPicker(forFallbackDiary diary: VideoDiary) {
-        draftAlbumName = fallbackAlbumTitle(for: diary)
-        selectedAlbumDiaryIDs = [diary.id]
-        editingAlbumID = diary.id
-        withAnimation(.snappy(duration: 0.28)) {
-            isAddAlbumComposerContentVisible = false
-            isAlbumHeaderHidden = false
-            isAddAlbumComposerPresented = false
-            isAlbumVideoPickerPresented = true
-        }
-    }
-
-    @MainActor
-    private func showSelectedAlbum(_ albumID: VideoAlbum.ID) {
+    private func showSelectedAlbum(_ albumID: VideoAlbum.ID, scrollProxy: ScrollViewProxy) {
         guard selectedAlbumID != albumID else {
             clearSelectedAlbum()
             return
         }
 
+        let shouldScrollToTop = scrollRuntime.currentAnchorY < Self.homeScrollTopThreshold
         withAnimation(.snappy(duration: 0.24)) {
             selectedAlbumID = albumID
-            isAlbumHeaderHidden = false
+            albumCollapseProgress = 0
             resetHomeScrollTracking()
             activeDiaryID = nil
+        }
+
+        if shouldScrollToTop {
+            withAnimation(.snappy(duration: 0.24)) {
+                scrollProxy.scrollTo(Self.homeScrollTopID, anchor: .top)
+            }
         }
     }
 
@@ -591,7 +1260,7 @@ struct HomeView: View {
             return
         }
 
-        guard !isAddAlbumComposerPresented && !isAlbumVideoPickerPresented else {
+        guard !isAddAlbumComposerPresented && !isAlbumVideoPickerPresented && !isAlbumCoverPickerPresented else {
             return
         }
 
@@ -614,14 +1283,53 @@ struct HomeView: View {
 
     @MainActor
     private func closeAddAlbumFlow() {
+        let shouldDelayReset = isAddAlbumComposerPresented || isAlbumVideoPickerPresented || isAlbumCoverPickerPresented
         withAnimation(.snappy(duration: 0.24)) {
             isAddAlbumComposerContentVisible = false
             isAddAlbumComposerPresented = false
             isAlbumVideoPickerPresented = false
+            isAlbumCoverPickerPresented = false
         }
+        if shouldDelayReset {
+            resetAlbumComposerDraftAfterCollapse()
+        } else {
+            resetAlbumComposerDraft()
+        }
+    }
+
+    @MainActor
+    private func resetAlbumComposerDraftAfterCollapse() {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.albumComposerResetDelayNanoseconds)
+            guard !isAddAlbumComposerPresented && !isAlbumVideoPickerPresented && !isAlbumCoverPickerPresented else {
+                return
+            }
+            resetAlbumComposerDraft()
+        }
+    }
+
+    @MainActor
+    private func resetAlbumComposerDraft() {
         draftAlbumName = ""
         selectedAlbumDiaryIDs = []
+        draftAlbumCoverImageData = nil
         editingAlbumID = nil
+        pendingDeleteAlbumID = nil
+        albumComposerMode = .add
+        albumComposerSourceFrame = nil
+        albumComposerSourceCoverImageData = nil
+        albumComposerSourceCoverDiary = nil
+        shouldReturnToAlbumComposerAfterVideoPicker = false
+    }
+
+    private func albumCoverFrame(from itemFrame: CGRect) -> CGRect {
+        let coverSize = itemFrame.width
+        return CGRect(
+            x: itemFrame.minX,
+            y: itemFrame.minY,
+            width: coverSize,
+            height: coverSize
+        )
     }
 
     @MainActor
@@ -637,18 +1345,43 @@ struct HomeView: View {
 
     @MainActor
     private func saveAlbum() {
+        Task {
+            await saveAlbumWithResolvedCover()
+        }
+    }
+
+    @MainActor
+    private func saveAlbumWithResolvedCover() async {
         guard !selectedAlbumDiaryIDs.isEmpty else {
             return
         }
 
+        let resolvedCoverImageData: Data?
+        if let draftAlbumCoverImageData {
+            resolvedCoverImageData = draftAlbumCoverImageData
+        } else if let existingCoverImageData = existingCoverImageDataForEditingAlbum() {
+            resolvedCoverImageData = existingCoverImageData
+        } else {
+            resolvedCoverImageData = await automaticCoverImageData(for: selectedAlbumDiaryIDs)
+        }
+
         if let editingAlbumID, let albumIndex = albums.firstIndex(where: { $0.id == editingAlbumID }) {
+            let trimmedName = draftAlbumName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let finalName = trimmedName.isEmpty ? "New Album" : trimmedName
             let orderedIDs = uniqueOrderedIDs(selectedAlbumDiaryIDs)
+            albums[albumIndex].name = finalName
             albums[albumIndex].diaryIDs = orderedIDs
             albums[albumIndex].coverDiaryID = orderedIDs.first
+            albums[albumIndex].coverImageData = resolvedCoverImageData
             selectedAlbumID = editingAlbumID
         } else {
             let newAlbumID = editingAlbumID ?? UUID()
-            createAlbum(id: newAlbumID, name: draftAlbumName, diaryIDs: selectedAlbumDiaryIDs)
+            createAlbum(
+                id: newAlbumID,
+                name: draftAlbumName,
+                diaryIDs: selectedAlbumDiaryIDs,
+                coverImageData: resolvedCoverImageData
+            )
             selectedAlbumID = newAlbumID
         }
 
@@ -656,16 +1389,42 @@ struct HomeView: View {
     }
 
     @MainActor
+    private func existingCoverImageDataForEditingAlbum() -> Data? {
+        guard
+            let editingAlbumID,
+            let album = albums.first(where: { $0.id == editingAlbumID })
+        else {
+            return nil
+        }
+
+        return album.coverImageData
+    }
+
+    @MainActor
+    private func automaticCoverImageData(for diaryIDs: [VideoDiary.ID]) async -> Data? {
+        let orderedIDs = uniqueOrderedIDs(diaryIDs)
+        guard
+            let firstDiaryID = orderedIDs.first,
+            let diary = diaries.first(where: { $0.id == firstDiaryID }),
+            let url = diary.videoURL
+        else {
+            return nil
+        }
+
+        return try? await AlbumCoverImageRenderer.coverImageData(forVideoAt: url)
+    }
+
+    @MainActor
     private func removeDiaryFromAlbums(_ diaryID: VideoDiary.ID) {
-        albums = albums.compactMap { album in
+        albums = albums.map { album in
             var nextAlbum = album
             nextAlbum.diaryIDs.removeAll { $0 == diaryID }
 
-            if nextAlbum.diaryIDs.isEmpty {
-                return nil
-            }
-
-            if nextAlbum.coverDiaryID == diaryID {
+            if let coverID = nextAlbum.coverDiaryID {
+                if !nextAlbum.diaryIDs.contains(coverID) {
+                    nextAlbum.coverDiaryID = nextAlbum.diaryIDs.first
+                }
+            } else {
                 nextAlbum.coverDiaryID = nextAlbum.diaryIDs.first
             }
 
@@ -684,28 +1443,298 @@ struct HomeView: View {
         }
     }
 
-    private func fallbackAlbumTitle(for diary: VideoDiary) -> String {
-        let words = diary.title.split(separator: " ")
-        guard let first = words.first else {
-            return "Album"
-        }
-        return String(first)
+    private func galleryContextMenuRevision(
+        diary: VideoDiary,
+        width: CGFloat,
+        height: CGFloat,
+        column: Int
+    ) -> String {
+        [
+            diary.id.uuidString,
+            diary.title,
+            diary.localVideoFilename,
+            stableLayoutToken(diary.displayAspectRatio),
+            stableLayoutToken(width),
+            stableLayoutToken(height),
+            "\(column)"
+        ].joined(separator: "|")
     }
 
-    private func albumTagTitles(for diary: VideoDiary) -> [String] {
-        let matchingAlbumNames = albums
-            .filter { $0.diaryIDs.contains(diary.id) }
-            .map(\.name)
+    private func timelineContextMenuRevision(diary: VideoDiary, width: CGFloat, isActive: Bool) -> String {
+        [
+            diary.id.uuidString,
+            diary.title,
+            "\(stableTextHash(diary.body))",
+            diary.localVideoFilename,
+            stableLayoutToken(diary.displayAspectRatio),
+            stableLayoutToken(width),
+            isActive ? "active" : "inactive"
+        ].joined(separator: "|")
+    }
 
-        guard !matchingAlbumNames.isEmpty else {
-            return [fallbackAlbumTitle(for: diary)]
+    private func stableLayoutToken(_ value: CGFloat) -> String {
+        "\(Int((value * 100).rounded()))"
+    }
+
+    private func stableTextHash(_ text: String) -> Int {
+        var hasher = Hasher()
+        hasher.combine(text)
+        return hasher.finalize()
+    }
+
+}
+
+private struct HomeContextMenuCard<Content: View>: UIViewControllerRepresentable {
+    let diary: VideoDiary
+    let contentRevision: String
+    let sourceCornerRadius: CGFloat
+    let previewTopShadowOpacity: Double
+    let onDelete: (VideoDiary) -> Void
+    let onShareVideo: (VideoDiary) -> Void
+    let onShareNote: (VideoDiary) -> Void
+    let onEdit: (VideoDiary) -> Void
+    private let content: () -> Content
+
+    init(
+        diary: VideoDiary,
+        contentRevision: String,
+        sourceCornerRadius: CGFloat,
+        previewTopShadowOpacity: Double = 0,
+        onDelete: @escaping (VideoDiary) -> Void,
+        onShareVideo: @escaping (VideoDiary) -> Void,
+        onShareNote: @escaping (VideoDiary) -> Void,
+        onEdit: @escaping (VideoDiary) -> Void,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.diary = diary
+        self.contentRevision = contentRevision
+        self.sourceCornerRadius = sourceCornerRadius
+        self.previewTopShadowOpacity = previewTopShadowOpacity
+        self.onDelete = onDelete
+        self.onShareVideo = onShareVideo
+        self.onShareNote = onShareNote
+        self.onEdit = onEdit
+        self.content = content
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIViewController(context: Context) -> UIHostingController<Content> {
+        let controller = UIHostingController(rootView: content())
+        controller.view.backgroundColor = .clear
+        controller.view.isOpaque = false
+        controller.view.addInteraction(UIContextMenuInteraction(delegate: context.coordinator))
+        context.coordinator.renderedContentRevision = contentRevision
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: UIHostingController<Content>, context: Context) {
+        context.coordinator.parent = self
+        guard context.coordinator.renderedContentRevision != contentRevision else {
+            return
         }
 
-        guard matchingAlbumNames.count > 3 else {
-            return matchingAlbumNames
+        uiViewController.rootView = content()
+        context.coordinator.renderedContentRevision = contentRevision
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiViewController: UIHostingController<Content>,
+        context: Context
+    ) -> CGSize? {
+        guard let width = proposal.width, let height = proposal.height else {
+            return nil
         }
 
-        return Array(matchingAlbumNames.prefix(2)) + ["..."]
+        return CGSize(width: width, height: height)
+    }
+
+    final class Coordinator: NSObject, UIContextMenuInteractionDelegate {
+        var parent: HomeContextMenuCard
+        var renderedContentRevision: String?
+
+        init(parent: HomeContextMenuCard) {
+            self.parent = parent
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            configurationForMenuAtLocation location: CGPoint
+        ) -> UIContextMenuConfiguration? {
+            let sourceView = interaction.view
+            let configuration = UIContextMenuConfiguration(
+                identifier: NSString(string: parent.diary.id.uuidString),
+                previewProvider: { [weak self, weak sourceView] in
+                    self?.makePreviewController(sourceView: sourceView)
+                },
+                actionProvider: { [weak self] _ in
+                    self?.makeMenu() ?? UIMenu(children: [])
+                }
+            )
+            configuration.preferredMenuElementOrder = .fixed
+            return configuration
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
+        ) -> UITargetedPreview? {
+            makeTargetedPreview(for: interaction)
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            previewForDismissingMenuWithConfiguration configuration: UIContextMenuConfiguration
+        ) -> UITargetedPreview? {
+            makeTargetedPreview(for: interaction)
+        }
+
+        private func makeMenu() -> UIMenu {
+            let diary = parent.diary
+            let deleteAction = UIAction(
+                title: "Delete",
+                image: UIImage(systemName: "trash"),
+                attributes: .destructive
+            ) { [weak self] _ in
+                guard let self else { return }
+                DispatchQueue.main.async {
+                    self.parent.onDelete(diary)
+                }
+            }
+
+            let shareVideoAttributes: UIMenuElement.Attributes = diary.videoURL == nil ? .disabled : []
+            let shareVideoAction = UIAction(
+                title: "Share Video",
+                image: UIImage(systemName: "film"),
+                attributes: shareVideoAttributes
+            ) { [weak self] _ in
+                guard let self else { return }
+                DispatchQueue.main.async {
+                    self.parent.onShareVideo(diary)
+                }
+            }
+
+            let shareNoteAction = UIAction(
+                title: "Share Note",
+                image: UIImage(systemName: "note.text")
+            ) { [weak self] _ in
+                guard let self else { return }
+                DispatchQueue.main.async {
+                    self.parent.onShareNote(diary)
+                }
+            }
+
+            let editAction = UIAction(
+                title: "Edit",
+                image: UIImage(systemName: "pencil")
+            ) { [weak self] _ in
+                guard let self else { return }
+                DispatchQueue.main.async {
+                    self.parent.onEdit(diary)
+                }
+            }
+
+            return UIMenu(children: [deleteAction, shareVideoAction, shareNoteAction, editAction])
+        }
+
+        private func makeTargetedPreview(for interaction: UIContextMenuInteraction) -> UITargetedPreview? {
+            guard let sourceView = interaction.view, sourceView.window != nil else { return nil }
+            let parameters = UIPreviewParameters()
+            parameters.backgroundColor = .clear
+            if parent.sourceCornerRadius > 0 {
+                parameters.visiblePath = UIBezierPath(
+                    roundedRect: sourceView.bounds,
+                    cornerRadius: parent.sourceCornerRadius
+                )
+            } else {
+                parameters.visiblePath = UIBezierPath(rect: sourceView.bounds)
+            }
+            return UITargetedPreview(view: sourceView, parameters: parameters)
+        }
+
+        private func makePreviewController(sourceView: UIView?) -> UIViewController {
+            let metrics = makePreviewMetrics(sourceView: sourceView)
+            let controller = UIHostingController(
+                rootView: HomeContextMenuPreviewCard(
+                    diary: parent.diary,
+                    outerSize: metrics.outerSize,
+                    cardSize: metrics.cardSize,
+                    cornerRadius: metrics.cornerRadius,
+                    topShadowOpacity: parent.previewTopShadowOpacity
+                )
+            )
+            controller.view.backgroundColor = .clear
+            controller.view.isOpaque = false
+            controller.view.clipsToBounds = false
+            controller.view.layer.masksToBounds = false
+            controller.view.frame = CGRect(origin: .zero, size: metrics.outerSize)
+            controller.preferredContentSize = metrics.outerSize
+            return controller
+        }
+
+        private func makePreviewMetrics(sourceView: UIView?) -> (outerSize: CGSize, cardSize: CGSize, cornerRadius: CGFloat) {
+            let fallbackSize = sourceView?.bounds.size ?? CGSize(width: 420, height: 912)
+            let windowSize = sourceView?.window?.bounds.size ?? fallbackSize
+            let baseWidth = min(max(windowSize.width, 1), 420)
+            let horizontalSafetyInset = parent.diary.isLandscapeVideo ? 0 : min(max(baseWidth * (8 / 420), 5), 10)
+            let naturalCardWidth = max(1, baseWidth - horizontalSafetyInset * 2)
+            let videoHeight = naturalCardWidth / max(parent.diary.displayAspectRatio, 0.1)
+            let colorBlockOverflow = parent.diary.isLandscapeVideo ? naturalCardWidth * (86 / 420) : 0
+            let naturalCardHeight = max(1, videoHeight + colorBlockOverflow)
+            let verticalSafetyInset = parent.diary.isLandscapeVideo ? 0 : min(max(baseWidth * (18 / 420), 12), 20)
+            let naturalOuterHeight = naturalCardHeight + verticalSafetyInset * 2
+            let maxHeight = max(160, windowSize.height * 0.70)
+            let scale = min(1, maxHeight / naturalOuterHeight)
+            let scaledHorizontalInset = horizontalSafetyInset * scale
+            let scaledInset = verticalSafetyInset * scale
+            let cardSize = CGSize(width: naturalCardWidth * scale, height: naturalCardHeight * scale)
+            let outerSize = CGSize(width: cardSize.width + scaledHorizontalInset * 2, height: cardSize.height + scaledInset * 2)
+            let cornerRadius = min(30 * scale, cardSize.width * 0.12)
+            return (outerSize, cardSize, cornerRadius)
+        }
+    }
+}
+
+private struct HomeContextMenuPreviewCard: View {
+    let diary: VideoDiary
+    let outerSize: CGSize
+    let cardSize: CGSize
+    let cornerRadius: CGFloat
+    let topShadowOpacity: Double
+
+    var body: some View {
+        ZStack {
+            Color.clear
+
+            BlendedVideoSurface(
+                url: diary.videoURL,
+                aspectRatio: diary.displayAspectRatio,
+                fallbackTint: diary.fallbackTint,
+                isPlaying: false,
+                width: cardSize.width,
+                height: cardSize.height,
+                videoGravity: .resizeAspect
+            ) { _, _, _ in
+                HomeDiaryTextOverlay(
+                    diary: diary,
+                    width: cardSize.width,
+                    cardHeight: cardSize.height,
+                    layout: diary.isLandscapeVideo ? .landscape : .vertical
+                )
+            }
+            .frame(width: cardSize.width, height: cardSize.height)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .shadow(
+                color: .black.opacity(topShadowOpacity),
+                radius: topShadowOpacity > 0 ? 18 : 0,
+                x: 0,
+                y: topShadowOpacity > 0 ? -8 : 0
+            )
+        }
+        .frame(width: outerSize.width, height: outerSize.height)
     }
 }
 
@@ -713,16 +1742,18 @@ private struct HomeAlbumHeader: View {
     let diaries: [VideoDiary]
     let albums: [VideoAlbum]
     let selectedAlbumID: VideoAlbum.ID?
+    let hiddenAlbumID: VideoAlbum.ID?
     let screenWidth: CGFloat
     let xScale: CGFloat
     let yScale: CGFloat
     let onAddAlbum: () -> Void
     let onSelectAlbum: (VideoAlbum.ID) -> Void
+    let onLongPressAlbum: (VideoAlbum.ID) -> Void
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            GalleryAlbumBackdrop(height: 226 * yScale)
-                .frame(width: screenWidth, height: 226 * yScale)
+            GalleryAlbumBackdrop(height: 244 * yScale)
+                .frame(width: screenWidth, height: 244 * yScale)
 
             GallerySectionTitle("Albums", xScale: xScale)
                 .offset(x: 19 * xScale, y: 76 * yScale)
@@ -731,15 +1762,16 @@ private struct HomeAlbumHeader: View {
                 diaries: diaries,
                 albums: albums,
                 selectedAlbumID: selectedAlbumID,
+                hiddenAlbumID: hiddenAlbumID,
                 xScale: xScale,
-                selectedPointerOffsetY: -13 * yScale,
                 onAddAlbum: onAddAlbum,
-                onSelectAlbum: onSelectAlbum
+                onSelectAlbum: onSelectAlbum,
+                onLongPressAlbum: onLongPressAlbum
             )
             .frame(width: screenWidth, height: 92 * xScale)
-            .offset(y: 134 * yScale)
+            .offset(y: 147 * yScale)
         }
-        .frame(width: screenWidth, height: 226 * yScale, alignment: .topLeading)
+        .frame(width: screenWidth, height: 244 * yScale, alignment: .topLeading)
     }
 }
 
@@ -765,53 +1797,39 @@ private enum ViewModeSelection: Hashable {
     case gallery
 }
 
-private struct ViewModeSwitch: View {
+private struct LiquidGlassDisplayModeToggle: View {
     @Binding var selection: ViewModeSelection
     let xScale: CGFloat
-    @State private var bubbleMode: ViewModeSelection?
-    @State private var pressedMode: ViewModeSelection?
-    @State private var phase: ViewModeSwitchPhase = .idle
-    @State private var bubbleScale: CGFloat = 1
-    @State private var bubbleScaleX: CGFloat = 1
-    @State private var lobeScale: CGFloat = 0.001
-    @State private var travelDirection: CGFloat = 0
-    @State private var isAnimating = false
 
-    private var switchAnimation: Animation {
-        .spring(response: 0.35, dampingFraction: 0.78)
-    }
+    private let widthBase: CGFloat = 100
+    private let heightBase: CGFloat = 44
+    private let horizontalInsetBase: CGFloat = 4
+    private let selectionHeightBase: CGFloat = 36
 
     var body: some View {
-        let width = 100 * xScale
-        let height = 44 * xScale
-        let horizontalInset = 3 * xScale
+        let width = widthBase * xScale
+        let height = heightBase * xScale
+        let horizontalInset = horizontalInsetBase * xScale
         let buttonWidth = (width - horizontalInset * 2) / 2
-        let indicatorWidth = 37 * xScale
-        let indicatorHeight = 35 * xScale
-        let visualSelection = bubbleMode ?? selection
-        let indicatorCenterX = horizontalInset
-            + buttonWidth * (visualSelection == .timeline ? 0.5 : 1.5)
-        let indicatorCenterY = height / 2 + (phase == .pressing ? -0.5 * xScale : 0)
+        let selectionWidth = buttonWidth
+        let selectionHeight = selectionHeightBase * xScale
+        let selectionCenterX = horizontalInset
+            + buttonWidth * (selection == .timeline ? 0.5 : 1.5)
 
         ZStack(alignment: .topLeading) {
             GlassEffectContainer(spacing: 0) {
                 ZStack(alignment: .topLeading) {
-                    LiquidGlassCapsuleSurface(width: width, height: height, xScale: xScale)
+                    Capsule()
+                        .fill(.clear)
+                        .frame(width: width, height: height)
+                        .glassEffect(.regular.interactive(), in: Capsule())
 
-                    LiquidSelectionBlob(
-                        width: indicatorWidth,
-                        height: indicatorHeight,
-                        xScale: xScale,
-                        lobeScale: lobeScale,
-                        travelDirection: travelDirection
-                    )
-                        .scaleEffect(x: bubbleScaleX, y: bubbleScale, anchor: .center)
-                        .position(x: indicatorCenterX, y: indicatorCenterY)
-                        .animation(switchAnimation, value: visualSelection)
-                        .animation(.spring(response: 0.20, dampingFraction: 0.72), value: phase)
-                        .animation(.spring(response: 0.28, dampingFraction: 0.66), value: bubbleScale)
-                        .animation(.spring(response: 0.32, dampingFraction: 0.72), value: bubbleScaleX)
-                        .animation(.spring(response: 0.26, dampingFraction: 0.68), value: lobeScale)
+                    Capsule()
+                        .fill(.clear)
+                        .frame(width: selectionWidth, height: selectionHeight)
+                        .glassEffect(.regular, in: Capsule())
+                        .position(x: selectionCenterX, y: height / 2)
+                        .animation(.snappy(duration: 0.24), value: selection)
                         .allowsHitTesting(false)
                 }
                 .frame(width: width, height: height)
@@ -819,18 +1837,10 @@ private struct ViewModeSwitch: View {
             .allowsHitTesting(false)
 
             HStack(spacing: 0) {
-                modeButton(
-                    systemName: "rectangle.portrait.fill",
-                    mode: .timeline,
-                    visualSelection: visualSelection
-                )
+                modeButton(systemName: "rectangle.portrait.fill", mode: .timeline)
                 .frame(width: buttonWidth, height: height)
 
-                modeButton(
-                    systemName: "square.grid.3x3.fill",
-                    mode: .gallery,
-                    visualSelection: visualSelection
-                )
+                modeButton(systemName: "square.grid.3x3.fill", mode: .gallery)
                 .frame(width: buttonWidth, height: height)
             }
             .padding(.horizontal, horizontalInset)
@@ -838,233 +1848,30 @@ private struct ViewModeSwitch: View {
         }
         .frame(width: width, height: height)
         .contentShape(Capsule())
-        .onAppear {
-            bubbleMode = selection
-        }
-        .onChange(of: selection) { _, newValue in
-            guard !isAnimating else { return }
-            withAnimation(switchAnimation) {
-                bubbleMode = newValue
-                phase = .settling
-                bubbleScale = 1
-                bubbleScaleX = 1
-                lobeScale = 0.001
-                travelDirection = 0
-            }
-        }
     }
 
-    private func modeButton(
-        systemName: String,
-        mode: ViewModeSelection,
-        visualSelection: ViewModeSelection
-    ) -> some View {
-        let isSelected = visualSelection == mode
-        let isPressedTarget = pressedMode == mode
-        let iconScale = isSelected ? 1 : (isPressedTarget ? 1.08 : 0.9)
-        let iconColor = isSelected
-            ? Color.black
-            : Color(white: isPressedTarget ? 0.42 : 0.56)
+    private func modeButton(systemName: String, mode: ViewModeSelection) -> some View {
+        let isSelected = selection == mode
 
         return Button {
-            animateSelection(to: mode)
+            withAnimation(.snappy(duration: 0.24)) {
+                selection = mode
+            }
         } label: {
             Image(systemName: systemName)
                 .font(.system(size: 15.5 * xScale, weight: .semibold))
                 .symbolRenderingMode(.monochrome)
-                .foregroundStyle(iconColor)
-                .scaleEffect(iconScale)
+                .foregroundStyle(isSelected ? .primary : .secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
-                .animation(.spring(response: 0.24, dampingFraction: 0.76), value: isSelected)
-                .animation(.spring(response: 0.18, dampingFraction: 0.7), value: isPressedTarget)
+                .animation(.snappy(duration: 0.18), value: isSelected)
         }
         .buttonStyle(.plain)
-    }
-
-    private func animateSelection(to mode: ViewModeSelection) {
-        let visualSelection = bubbleMode ?? selection
-        guard mode != visualSelection else {
-            pulseCurrentMode(mode)
-            return
-        }
-        guard !isAnimating else { return }
-
-        isAnimating = true
-        pressedMode = mode
-        phase = .pressing
-        travelDirection = mode == .gallery ? 1 : -1
-
-        withAnimation(.spring(response: 0.18, dampingFraction: 0.72)) {
-            bubbleScale = 1.16
-            bubbleScaleX = 1.10
-            lobeScale = 0.28
-        }
-
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 90_000_000)
-
-            selection = mode
-            phase = .traveling
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
-                bubbleMode = mode
-                bubbleScale = 1.12
-                bubbleScaleX = 1.32
-                lobeScale = 0.96
-            }
-
-            try? await Task.sleep(nanoseconds: 270_000_000)
-
-            phase = .settling
-            withAnimation(.spring(response: 0.26, dampingFraction: 0.66)) {
-                bubbleScale = 1
-                bubbleScaleX = 1
-                lobeScale = 0.001
-                pressedMode = nil
-            }
-
-            try? await Task.sleep(nanoseconds: 120_000_000)
-            phase = .idle
-            travelDirection = 0
-            isAnimating = false
-        }
-    }
-
-    private func pulseCurrentMode(_ mode: ViewModeSelection) {
-        pressedMode = mode
-        phase = .pressing
-        travelDirection = 0
-        withAnimation(.spring(response: 0.18, dampingFraction: 0.72)) {
-            bubbleScale = 1.15
-            bubbleScaleX = 1.10
-            lobeScale = 0.22
-        }
-
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 120_000_000)
-            phase = .settling
-            withAnimation(.spring(response: 0.24, dampingFraction: 0.68)) {
-                bubbleScale = 1
-                bubbleScaleX = 1
-                lobeScale = 0.001
-                pressedMode = nil
-            }
-            try? await Task.sleep(nanoseconds: 100_000_000)
-            phase = .idle
-            travelDirection = 0
-        }
-    }
-}
-
-private enum ViewModeSwitchPhase {
-    case idle
-    case pressing
-    case traveling
-    case settling
-}
-
-private struct LiquidSelectionBlob: View {
-    let width: CGFloat
-    let height: CGFloat
-    let xScale: CGFloat
-    let lobeScale: CGFloat
-    let travelDirection: CGFloat
-
-    private var lobeOffset: CGFloat {
-        guard travelDirection != 0 else { return 0 }
-        return -travelDirection * width * 0.42
-    }
-
-    var body: some View {
-        let stroke = max(0.6, 0.8 * xScale)
-        let darkStroke = max(0.4, 0.5 * xScale)
-
-        return ZStack {
-            ZStack {
-                Capsule()
-                    .fill(.clear)
-                    .frame(width: height * 0.78, height: height * 0.86)
-                    .glassEffect(.regular.tint(.white.opacity(0.42)).interactive(), in: Capsule())
-                    .overlay(
-                        Capsule()
-                            .fill(lobeOverlay)
-                            .blendMode(.plusLighter)
-                    )
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(Color.white.opacity(0.62), lineWidth: stroke)
-                    )
-                    .scaleEffect(x: max(lobeScale, 0.001), y: max(lobeScale * 0.9, 0.001))
-                    .offset(x: lobeOffset)
-
-                Capsule()
-                    .fill(.clear)
-                    .frame(width: width, height: height)
-                    .glassEffect(.regular.tint(.white.opacity(0.50)).interactive(), in: Capsule())
-                    .overlay(
-                        Capsule()
-                            .fill(mainOverlay)
-                            .blendMode(.plusLighter)
-                    )
-                    .overlay(alignment: .topLeading) {
-                        Capsule()
-                            .fill(Color.white.opacity(0.78))
-                            .frame(width: width * 0.56, height: height * 0.22)
-                            .blur(radius: 3.5 * xScale)
-                            .offset(x: 6 * xScale, y: 3 * xScale)
-                    }
-                    .overlay(alignment: .bottomTrailing) {
-                        Circle()
-                            .stroke(Color.cyan.opacity(0.14), lineWidth: max(0.6, 1.2 * xScale))
-                            .frame(width: height * 0.58, height: height * 0.58)
-                            .blur(radius: 0.8 * xScale)
-                            .offset(x: 2 * xScale, y: 2 * xScale)
-                    }
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(Color.white.opacity(0.94), lineWidth: stroke)
-                    )
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(Color.black.opacity(0.07), lineWidth: darkStroke)
-                            .blur(radius: 0.35 * xScale)
-                    )
-            }
-            .frame(width: width + height * 0.44, height: height + 10 * xScale)
-            .shadow(color: .black.opacity(0.16), radius: 18 * xScale, y: 5 * xScale)
-        }
-        .frame(width: width + height * 0.44, height: height + 10 * xScale)
-        .allowsHitTesting(false)
-    }
-
-    private var mainOverlay: LinearGradient {
-        LinearGradient(
-            colors: [
-                Color.white.opacity(0.58),
-                Color.white.opacity(0.24),
-                Color.white.opacity(0.08)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-    }
-
-    private var lobeOverlay: LinearGradient {
-        LinearGradient(
-            colors: [
-                Color.white.opacity(0.46),
-                Color.cyan.opacity(0.12),
-                Color.white.opacity(0.06)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
     }
 }
 
 private struct VideoDiaryCard: View {
     let diary: VideoDiary
-    let albumTagTitles: [String]
     let width: CGFloat
     let isActive: Bool
 
@@ -1086,11 +1893,11 @@ private struct VideoDiaryCard: View {
             aspectRatio: diary.displayAspectRatio,
             fallbackTint: diary.fallbackTint,
             isPlaying: isActive,
-            width: width
+            width: width,
+            colorSamplingPolicy: .preferDerivedAssetCache
         ) { _, _, _ in
             DiaryTextBlock(
                 diary: diary,
-                albumTagTitles: albumTagTitles,
                 width: width,
                 cardHeight: cardHeight,
                 isLandscapeVideo: diary.isLandscapeVideo
@@ -1102,7 +1909,6 @@ private struct VideoDiaryCard: View {
 
 private struct DiaryTextBlock: View {
     let diary: VideoDiary
-    let albumTagTitles: [String]
     let width: CGFloat
     let cardHeight: CGFloat
     let isLandscapeVideo: Bool
@@ -1110,7 +1916,6 @@ private struct DiaryTextBlock: View {
     var body: some View {
         HomeDiaryTextOverlay(
             diary: diary,
-            albumTagTitles: albumTagTitles,
             width: width,
             cardHeight: cardHeight,
             layout: isLandscapeVideo ? .landscape : .vertical
@@ -1120,7 +1925,6 @@ private struct DiaryTextBlock: View {
 
 private struct HomeDiaryTextOverlay: View {
     let diary: VideoDiary
-    let albumTagTitles: [String]
     let width: CGFloat
     let cardHeight: CGFloat
     let layout: Layout
@@ -1272,11 +2076,13 @@ private struct HomeDiaryTextOverlay: View {
                 y: cardHeight - scaled(layout.titleTopFromBottom)
             )
 
-            HomeDateAlbumLine(
+            HomeSingleLineTextLabel(
                 text: diary.dateText,
-                albumTagTitles: albumTagTitles,
-                width: scaled(layout.dateWidth),
-                scale: scale
+                fontName: "PingFangSC-Medium",
+                fontSize: scaled(14),
+                letterSpacing: scaled(0.14),
+                labelWidth: scaled(layout.dateWidth),
+                labelHeight: scaled(22)
             )
             .offset(
                 x: scaled(layout.dateX),
@@ -1320,7 +2126,7 @@ private struct HomeBodyTextLabel: UIViewRepresentable {
     let labelHeight: CGFloat
 
     func makeUIView(context: Context) -> UILabel {
-        let label = UILabel()
+        let label = TopAlignedUILabel()
         label.backgroundColor = .clear
         label.numberOfLines = 2
         label.lineBreakMode = .byTruncatingTail
@@ -1359,6 +2165,23 @@ private struct HomeBodyTextLabel: UIViewRepresentable {
     }
 }
 
+private final class TopAlignedUILabel: UILabel {
+    override func textRect(forBounds bounds: CGRect, limitedToNumberOfLines numberOfLines: Int) -> CGRect {
+        let textRect = super.textRect(forBounds: bounds, limitedToNumberOfLines: numberOfLines)
+        return CGRect(
+            x: textRect.minX,
+            y: bounds.minY,
+            width: textRect.width,
+            height: textRect.height
+        )
+    }
+
+    override func drawText(in rect: CGRect) {
+        let textRect = self.textRect(forBounds: rect, limitedToNumberOfLines: numberOfLines)
+        super.drawText(in: textRect)
+    }
+}
+
 private struct HomeSingleLineTextLabel: View {
     let text: String
     let fontName: String
@@ -1381,95 +2204,6 @@ private struct HomeSingleLineTextLabel: View {
 
     private var visualHeight: CGFloat {
         max(labelHeight, fontSize * 1.2)
-    }
-}
-
-private struct HomeDateAlbumLine: View {
-    let text: String
-    let albumTagTitles: [String]
-    let width: CGFloat
-    let scale: CGFloat
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 8 * scale) {
-            Text(text)
-                .font(.custom("PingFangSC-Medium", size: 14 * scale))
-                .tracking(0.14 * scale)
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-
-            ForEach(Array(albumTagTitles.enumerated()), id: \.offset) { _, title in
-                HomeAlbumTagPill(title: title, scale: scale)
-            }
-        }
-        .frame(width: width, height: 22 * scale, alignment: .leading)
-        .allowsHitTesting(false)
-    }
-}
-
-private struct HomeAlbumTagPill: View {
-    let title: String
-    let scale: CGFloat
-
-    private var height: CGFloat {
-        14 * scale
-    }
-
-    private var width: CGFloat {
-        (title == "..." ? 21 : 53) * scale
-    }
-
-    var body: some View {
-        ZStack {
-            HomeAlbumTagGlassSurface(width: width, height: height, scale: scale)
-
-            Text(title)
-                .font(.system(size: 8 * scale, weight: .medium))
-                .tracking(0.08 * scale)
-                .foregroundStyle(Color(red: 0.24, green: 0.24, blue: 0.24))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(width: width - 8 * scale, height: height, alignment: .center)
-        }
-        .frame(width: width, height: height)
-    }
-}
-
-private struct HomeAlbumTagGlassSurface: View {
-    let width: CGFloat
-    let height: CGFloat
-    let scale: CGFloat
-
-    var body: some View {
-        Capsule()
-            .fill(Color.white.opacity(0.18))
-            .frame(width: width, height: height)
-            .glassEffect(.regular.tint(.white.opacity(0.42)), in: Capsule())
-            .overlay(
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.38),
-                                Color.white.opacity(0.10),
-                                Color.white.opacity(0.02)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .blendMode(.plusLighter)
-            )
-            .overlay(
-                Capsule()
-                    .strokeBorder(Color.white.opacity(0.72), lineWidth: max(0.45, 0.55 * scale))
-            )
-            .overlay(
-                Capsule()
-                    .strokeBorder(Color.black.opacity(0.06), lineWidth: max(0.25, 0.35 * scale))
-            )
-            .shadow(color: .black.opacity(0.08), radius: 2.2 * scale, y: 0.8 * scale)
     }
 }
 
@@ -1564,6 +2298,28 @@ private struct HomeScreenEdgeFadeOverlay: View {
     }
 }
 
+private struct HomeCollapsedAddAlbumVisual: View {
+    let xScale: CGFloat
+
+    var body: some View {
+        ZStack {
+            MorphingAlbumCardShell(
+                width: 70 * xScale,
+                height: 70 * xScale,
+                cornerRadius: 10 * xScale,
+                overlayColor: .white.opacity(0.58),
+                shadowRadius: 10 * xScale,
+                shadowYOffset: 1 * xScale
+            )
+
+            Image(systemName: "plus")
+                .font(.system(size: 16 * xScale, weight: .semibold))
+                .foregroundStyle(Color.black.opacity(0.28))
+        }
+        .frame(width: 70 * xScale, height: 70 * xScale)
+    }
+}
+
 private struct HomeBottomControls: View {
     let searchWidth: CGFloat
     let height: CGFloat
@@ -1577,59 +2333,54 @@ private struct HomeBottomControls: View {
     }
 
     var body: some View {
-        let glassScale = height / 50
         let visibleGap = isSearchVisible ? gap : 0
 
-        ZStack {
-            GlassEffectContainer(spacing: visibleGap) {
-                HStack(spacing: visibleGap) {
-                    if isSearchVisible {
-                        LiquidGlassCapsuleSurface(width: searchWidth, height: height, xScale: glassScale)
-                            .frame(width: searchWidth, height: height)
-                    }
+        HStack(spacing: visibleGap) {
+            if isSearchVisible {
+                ZStack {
+                    Capsule()
+                        .fill(.clear)
+                        .frame(width: searchWidth, height: height)
+                        .glassEffect(.regular.interactive(), in: Capsule())
+                        .allowsHitTesting(false)
 
-                    LiquidGlassCapsuleSurface(
-                        width: addButtonSize,
-                        height: addButtonSize,
-                        xScale: addButtonSize / 50
-                    )
-                    .frame(width: addButtonSize, height: addButtonSize)
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 16, weight: .regular))
+
+                        Text("Search")
+                            .font(.system(size: 17, weight: .regular))
+
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(Color.black)
+                    .padding(.horizontal, 18)
                 }
+                .frame(width: searchWidth, height: height)
             }
-            .allowsHitTesting(false)
 
-            HStack(spacing: visibleGap) {
-                if isSearchVisible {
-                    ZStack {
-                        HStack(spacing: 8) {
-                            Image(systemName: "magnifyingglass")
-                                .font(.system(size: 16, weight: .regular))
-
-                            Text("Search")
-                                .font(.system(size: 17, weight: .regular))
-
-                            Spacer(minLength: 0)
-                        }
-                        .foregroundStyle(Color.black)
-                        .padding(.horizontal, 18)
-                    }
-                    .frame(width: searchWidth, height: height)
-                }
-
-                Button(action: addAction) {
-                    ZStack {
-                        Image(systemName: "plus")
-                            .font(.system(size: max(20, addButtonSize * 0.44), weight: .semibold))
-                            .foregroundStyle(Color.black)
-                    }
-                    .frame(width: addButtonSize, height: addButtonSize)
-                    .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Add video diary")
-            }
+            LiquidGlassAddButton(size: addButtonSize, action: addAction)
         }
         .frame(width: width, height: max(height, addButtonSize))
+    }
+}
+
+private struct LiquidGlassAddButton: View {
+    let size: CGFloat
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "plus")
+                .font(.system(size: max(20, size * 0.44), weight: .semibold))
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(.primary)
+                .frame(width: size, height: size)
+                .contentShape(Circle())
+                .glassEffect(.regular.interactive(), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Add video diary")
     }
 }
 
@@ -1710,5 +2461,13 @@ private struct HomeScrollOffsetPreferenceKey: PreferenceKey {
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+private struct HomeContentTitleFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect?
+
+    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) {
+        value = nextValue() ?? value
     }
 }

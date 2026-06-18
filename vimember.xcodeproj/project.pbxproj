@@ -13,8 +13,10 @@
 		2B2F080B4826BBE5FBB13C62 /* sample-street-vertical.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 7C546D7529DFB0D99A3A18D5 /* sample-street-vertical.mp4 */; };
 		61E231FE649ED85142864159 /* VideoColorSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 047D896C3B84BDC7B510D932 /* VideoColorSampler.swift */; };
 		6EE6F045F7BD5B0CF4B0416B /* VideoPlayerSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6862B0442FDDA23284C2CE1F /* VideoPlayerSurface.swift */; };
+		78F2A5223B2D4D7B8E12B8A9 /* BundledImportedVideos in Resources */ = {isa = PBXBuildFile; fileRef = 6D5F0E944A7C4BE88B7C61AF /* BundledImportedVideos */; };
 		8A0E0C98E39542DB9D2084A2 /* GalleryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A0E0C98E39542DB9D2084A1 /* GalleryView.swift */; };
 		9C605EA8C22F267267B3AE21 /* VideoFileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F297D508C1E06B77CF492A /* VideoFileStore.swift */; };
+		9D2E3F4A5B6C7890A1B2C3D4 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 8C1D2E3F4A5B6C7890A1B2C3 /* AppIcon.icon */; };
 		71B2160C6D43A2B91E0F0011 /* LiquidGlassControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71B2160C6D43A2B91E0F0010 /* LiquidGlassControls.swift */; };
 		A5F97D48EB9EF077ACA010C8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9EF8B4DC14AC3EDB0ED9FF3A /* Assets.xcassets */; };
 		A60381FB83A08B3CC6623943 /* sample-city-vertical.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = A605B9F678DD8AFA994CA3AE /* sample-city-vertical.mp4 */; };
@@ -33,9 +35,11 @@
 		2C1156F253E578208C3258DD /* VideoDiary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoDiary.swift; sourceTree = "<group>"; };
 		41FF879E7864B71DFFADD18E /* vimember.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = vimember.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6594A3BE3DE9DA9BCCF6C99F /* vimemberApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = vimemberApp.swift; sourceTree = "<group>"; };
+		6D5F0E944A7C4BE88B7C61AF /* BundledImportedVideos */ = {isa = PBXFileReference; lastKnownFileType = folder; path = BundledImportedVideos; sourceTree = "<group>"; };
 		6862B0442FDDA23284C2CE1F /* VideoPlayerSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoPlayerSurface.swift; sourceTree = "<group>"; };
 		71B2160C6D43A2B91E0F0010 /* LiquidGlassControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiquidGlassControls.swift; sourceTree = "<group>"; };
 		7C546D7529DFB0D99A3A18D5 /* sample-street-vertical.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "sample-street-vertical.mp4"; sourceTree = "<group>"; };
+		8C1D2E3F4A5B6C7890A1B2C3 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		8A0E0C98E39542DB9D2084A1 /* GalleryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryView.swift; sourceTree = "<group>"; };
 		9EF8B4DC14AC3EDB0ED9FF3A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A605B9F678DD8AFA994CA3AE /* sample-city-vertical.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "sample-city-vertical.mp4"; sourceTree = "<group>"; };
@@ -127,6 +131,8 @@
 			isa = PBXGroup;
 			children = (
 				9EF8B4DC14AC3EDB0ED9FF3A /* Assets.xcassets */,
+				8C1D2E3F4A5B6C7890A1B2C3 /* AppIcon.icon */,
+				6D5F0E944A7C4BE88B7C61AF /* BundledImportedVideos */,
 				0D655B6DA55747D546DE56F3 /* SampleVideos */,
 			);
 			name = Resources;
@@ -216,6 +222,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				A5F97D48EB9EF077ACA010C8 /* Assets.xcassets in Resources */,
+				9D2E3F4A5B6C7890A1B2C3D4 /* AppIcon.icon in Resources */,
+				78F2A5223B2D4D7B8E12B8A9 /* BundledImportedVideos in Resources */,
 				1000521575F27F1223E327F0 /* sample-campus-wide.mp4 in Resources */,
 				2B2F080B4826BBE5FBB13C62 /* sample-street-vertical.mp4 in Resources */,
 				A60381FB83A08B3CC6623943 /* sample-city-vertical.mp4 in Resources */,

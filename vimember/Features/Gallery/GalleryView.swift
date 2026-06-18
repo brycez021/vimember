@@ -1,4 +1,5 @@
 import AVFoundation
+import Photos
 import QuickLookThumbnailing
 import SwiftUI
 import UIKit
@@ -7,13 +8,15 @@ struct GalleryView: View {
     let diaries: [VideoDiary]
     let albums: [VideoAlbum]
     let onSelectDiary: (VideoDiary) -> Void
-    let onCreateAlbum: (_ name: String, _ diaryIDs: [VideoDiary.ID]) -> Void
+    let onCreateAlbum: (_ name: String, _ diaryIDs: [VideoDiary.ID], _ coverImageData: Data?) -> Void
 
     @State private var isAddAlbumComposerPresented = false
     @State private var isAddAlbumComposerContentVisible = false
     @State private var isAlbumVideoPickerPresented = false
+    @State private var isAlbumCoverPickerPresented = false
     @State private var draftAlbumName = ""
     @State private var selectedAlbumDiaryIDs: [VideoDiary.ID] = []
+    @State private var draftAlbumCoverImageData: Data?
     @State private var addAlbumButtonFrame: CGRect?
 
     var body: some View {
@@ -26,18 +29,20 @@ struct GalleryView: View {
             let gridGap = 3 * xScale
             let cardWidth = (screenWidth - gridGap * 2) / 3
             let cardHeight = cardWidth * (184 / 138)
-            let albumTop = 121 * yScale
-            let videoGridTop = 280 * yScale
-            let addAlbumFallbackCenter = CGPoint(x: 55 * xScale, y: albumTop + 35 * xScale)
+            let albumComposerTop = 121 * yScale
+            let albumStripTop = 134 * yScale
+            let albumHeaderHeight = 244 * yScale
+            let videoGridTop = 287 * yScale
+            let addAlbumFallbackCenter = CGPoint(x: 55 * xScale, y: albumStripTop + 35 * xScale)
             let addAlbumShellFrame = CGRect(
                 x: 20 * xScale,
-                y: albumTop,
+                y: albumComposerTop + 13 * yScale,
                 width: 380 * xScale,
                 height: 416 * yScale
             )
             let addAlbumContentFrame = CGRect(
                 x: 20 * xScale,
-                y: albumTop - 8 * yScale,
+                y: albumComposerTop + 5 * yScale,
                 width: 380 * xScale,
                 height: 426 * yScale
             )
@@ -53,8 +58,8 @@ struct GalleryView: View {
 
                 ScrollView(.vertical, showsIndicators: false) {
                     ZStack(alignment: .topLeading) {
-                        GalleryAlbumBackdrop(height: 226 * yScale)
-                            .frame(width: screenWidth, height: 226 * yScale)
+                        GalleryAlbumBackdrop(height: albumHeaderHeight)
+                            .frame(width: screenWidth, height: albumHeaderHeight)
 
                         GallerySectionTitle("Albums", xScale: xScale)
                             .offset(x: 19 * xScale, y: 76 * yScale)
@@ -70,10 +75,10 @@ struct GalleryView: View {
                             onSelectAlbum: { _ in }
                         )
                             .frame(width: screenWidth, height: 92 * xScale)
-                            .offset(y: albumTop)
+                            .offset(y: albumStripTop)
 
                         GallerySectionTitle("All Videos", xScale: xScale)
-                            .offset(x: 20 * xScale, y: 239 * yScale)
+                            .offset(x: 20 * xScale, y: 251 * yScale)
 
                         LazyVGrid(
                             columns: [
@@ -111,9 +116,15 @@ struct GalleryView: View {
 
                 GalleryAlbumAddMorphOverlay(
                     name: $draftAlbumName,
+                    coverImageData: draftAlbumCoverImageData,
+                    coverDiary: nil,
+                    collapsedAlbumCoverImageData: nil,
+                    collapsedAlbumCoverDiary: nil,
+                    title: "New Album",
+                    leadingAction: .close,
                     isExpanded: isAddAlbumComposerPresented,
                     contentOpacity: isAddAlbumComposerContentVisible ? 1 : 0,
-                    collapsedFrame: addAlbumButtonFrame,
+                    collapsedFrame: albums.isEmpty ? nil : addAlbumButtonFrame,
                     fallbackCollapsedCenter: addAlbumFallbackCenter,
                     expandedShellFrame: addAlbumShellFrame,
                     expandedContentFrame: addAlbumContentFrame,
@@ -122,8 +133,13 @@ struct GalleryView: View {
                     onClose: {
                         closeAddAlbumFlow()
                     },
+                    onPickCover: {
+                        showAlbumCoverPicker()
+                    },
                     onNext: {
                         showAlbumVideoPicker()
+                    },
+                    onDelete: {
                     }
                 )
                 .frame(width: screenWidth, height: screenHeight, alignment: .topLeading)
@@ -149,6 +165,20 @@ struct GalleryView: View {
                     .transition(.opacity)
                     .zIndex(4)
                 }
+
+                if isAlbumCoverPickerPresented {
+                    GalleryAlbumCoverPicker(
+                        onBack: {
+                            closeAlbumCoverPicker()
+                        },
+                        onSelectCover: { imageData in
+                            draftAlbumCoverImageData = imageData
+                            closeAlbumCoverPicker()
+                        }
+                    )
+                    .transition(.opacity)
+                    .zIndex(5)
+                }
             }
             .frame(width: screenWidth, height: screenHeight)
             .coordinateSpace(name: GalleryAddAlbumMorphCoordinateSpace.name)
@@ -160,15 +190,18 @@ struct GalleryView: View {
         .ignoresSafeArea()
         .animation(.snappy(duration: 0.32), value: isAddAlbumComposerPresented)
         .animation(.snappy(duration: 0.24), value: isAlbumVideoPickerPresented)
+        .animation(.snappy(duration: 0.24), value: isAlbumCoverPickerPresented)
     }
 
     private func showAddAlbumComposer() {
         draftAlbumName = ""
         selectedAlbumDiaryIDs = []
+        draftAlbumCoverImageData = nil
         withAnimation(.snappy(duration: 0.32)) {
             isAddAlbumComposerContentVisible = false
             isAddAlbumComposerPresented = true
             isAlbumVideoPickerPresented = false
+            isAlbumCoverPickerPresented = false
         }
         revealAddAlbumComposerContent()
     }
@@ -177,7 +210,20 @@ struct GalleryView: View {
         withAnimation(.snappy(duration: 0.28)) {
             isAddAlbumComposerContentVisible = false
             isAddAlbumComposerPresented = false
+            isAlbumCoverPickerPresented = false
             isAlbumVideoPickerPresented = true
+        }
+    }
+
+    private func showAlbumCoverPicker() {
+        withAnimation(.snappy(duration: 0.24)) {
+            isAlbumCoverPickerPresented = true
+        }
+    }
+
+    private func closeAlbumCoverPicker() {
+        withAnimation(.snappy(duration: 0.24)) {
+            isAlbumCoverPickerPresented = false
         }
     }
 
@@ -186,9 +232,11 @@ struct GalleryView: View {
             isAddAlbumComposerContentVisible = false
             isAddAlbumComposerPresented = false
             isAlbumVideoPickerPresented = false
+            isAlbumCoverPickerPresented = false
         }
         draftAlbumName = ""
         selectedAlbumDiaryIDs = []
+        draftAlbumCoverImageData = nil
     }
 
     private func revealAddAlbumComposerContent() {
@@ -202,12 +250,39 @@ struct GalleryView: View {
     }
 
     private func saveAlbum() {
+        Task {
+            await saveAlbumWithResolvedCover()
+        }
+    }
+
+    @MainActor
+    private func saveAlbumWithResolvedCover() async {
         guard !selectedAlbumDiaryIDs.isEmpty else {
             return
         }
 
-        onCreateAlbum(draftAlbumName, selectedAlbumDiaryIDs)
+        let coverImageData: Data?
+        if let draftAlbumCoverImageData {
+            coverImageData = draftAlbumCoverImageData
+        } else {
+            coverImageData = await automaticCoverImageData()
+        }
+
+        onCreateAlbum(draftAlbumName, selectedAlbumDiaryIDs, coverImageData)
         closeAddAlbumFlow()
+    }
+
+    @MainActor
+    private func automaticCoverImageData() async -> Data? {
+        guard
+            let firstDiaryID = selectedAlbumDiaryIDs.first,
+            let diary = diaries.first(where: { $0.id == firstDiaryID }),
+            let url = diary.videoURL
+        else {
+            return nil
+        }
+
+        return try? await AlbumCoverImageRenderer.coverImageData(forVideoAt: url)
     }
 }
 
@@ -246,44 +321,249 @@ struct GallerySectionTitle: View {
     }
 }
 
+struct CalligraphSectionTitle: View {
+    let title: String
+    let xScale: CGFloat
+
+    @State private var renderedTitle: String
+    @State private var characters: [CalligraphCharacterItem]
+    @State private var nextCharacterID: Int
+
+    init(_ title: String, xScale: CGFloat) {
+        self.title = title
+        self.xScale = xScale
+
+        let initialCharacters = Array(title).enumerated().map { index, character in
+            CalligraphCharacterItem(
+                id: index,
+                character: character,
+                driftX: Self.driftOffsetX(index: index, count: title.count, changeRatio: 1, xScale: xScale)
+            )
+        }
+
+        _renderedTitle = State(initialValue: title)
+        _characters = State(initialValue: initialCharacters)
+        _nextCharacterID = State(initialValue: initialCharacters.count)
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: letterSpacing) {
+            ForEach(characters) { item in
+                Text(verbatim: String(item.character))
+                    .fixedSize()
+                    .transition(characterTransition(for: item))
+            }
+        }
+        .font(.system(size: 24 * xScale, weight: .semibold))
+        .foregroundStyle(.black)
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: title))
+        .onAppear {
+            guard renderedTitle != title else { return }
+            updateTitle(title, animated: false)
+        }
+        .onChange(of: title) { _, newTitle in
+            updateTitle(newTitle, animated: true)
+        }
+    }
+
+    private var letterSpacing: CGFloat {
+        24 * xScale * 0.01
+    }
+
+    private func updateTitle(_ newTitle: String, animated: Bool) {
+        let oldCharacters = Array(renderedTitle)
+        let newCharacters = Array(newTitle)
+        let result = Self.reconcileCharacters(
+            oldCharacters: oldCharacters,
+            oldItems: characters,
+            newCharacters: newCharacters,
+            nextID: nextCharacterID,
+            xScale: xScale
+        )
+
+        renderedTitle = newTitle
+        nextCharacterID = result.nextID
+
+        if animated {
+            withAnimation(Self.textAnimation) {
+                characters = result.items
+            }
+        } else {
+            characters = result.items
+        }
+    }
+
+    private func characterTransition(for item: CalligraphCharacterItem) -> AnyTransition {
+        let insertionActive = CalligraphCharacterTransitionModifier(
+            opacity: 0.35,
+            blurRadius: 0.25 * xScale,
+            scale: 0.985,
+            offsetX: item.driftX
+        )
+        let removalActive = CalligraphCharacterTransitionModifier(
+            opacity: 0,
+            blurRadius: 0,
+            scale: 1,
+            offsetX: 0
+        )
+        let identity = CalligraphCharacterTransitionModifier(
+            opacity: 1,
+            blurRadius: 0,
+            scale: 1,
+            offsetX: 0
+        )
+
+        return .asymmetric(
+            insertion: .modifier(active: insertionActive, identity: identity),
+            removal: .modifier(active: removalActive, identity: identity)
+        )
+    }
+
+    private static var textAnimation: Animation {
+        .timingCurve(0.19, 1, 0.22, 1, duration: 0.38)
+    }
+
+    private static func reconcileCharacters(
+        oldCharacters: [Character],
+        oldItems: [CalligraphCharacterItem],
+        newCharacters: [Character],
+        nextID: Int,
+        xScale: CGFloat
+    ) -> (items: [CalligraphCharacterItem], nextID: Int) {
+        let matches = longestCommonSubsequencePairs(oldCharacters, newCharacters)
+        var matchedOldIDsByNewIndex: [Int: Int] = [:]
+
+        for (oldIndex, newIndex) in matches {
+            guard oldItems.indices.contains(oldIndex) else { continue }
+            matchedOldIDsByNewIndex[newIndex] = oldItems[oldIndex].id
+        }
+
+        let newCount = newCharacters.count - matchedOldIDsByNewIndex.count
+        let removedCount = oldCharacters.count - matchedOldIDsByNewIndex.count
+        let maxLength = max(oldCharacters.count, newCharacters.count)
+        let rawChangeRatio = maxLength > 0 ? CGFloat(newCount + removedCount) / CGFloat(maxLength) : 1
+        let changeRatio = min(rawChangeRatio, 1.4)
+
+        var nextID = nextID
+        let items = newCharacters.enumerated().map { index, character in
+            let id = matchedOldIDsByNewIndex[index] ?? {
+                defer { nextID += 1 }
+                return nextID
+            }()
+
+            return CalligraphCharacterItem(
+                id: id,
+                character: character,
+                driftX: driftOffsetX(index: index, count: newCharacters.count, changeRatio: changeRatio, xScale: xScale)
+            )
+        }
+
+        return (items, nextID)
+    }
+
+    private static func longestCommonSubsequencePairs(
+        _ oldCharacters: [Character],
+        _ newCharacters: [Character]
+    ) -> [(oldIndex: Int, newIndex: Int)] {
+        let oldCount = oldCharacters.count
+        let newCount = newCharacters.count
+        guard oldCount > 0, newCount > 0 else { return [] }
+
+        var lengths = Array(
+            repeating: Array(repeating: 0, count: newCount + 1),
+            count: oldCount + 1
+        )
+
+        for oldIndex in 1...oldCount {
+            for newIndex in 1...newCount {
+                if oldCharacters[oldIndex - 1] == newCharacters[newIndex - 1] {
+                    lengths[oldIndex][newIndex] = lengths[oldIndex - 1][newIndex - 1] + 1
+                } else {
+                    lengths[oldIndex][newIndex] = max(
+                        lengths[oldIndex - 1][newIndex],
+                        lengths[oldIndex][newIndex - 1]
+                    )
+                }
+            }
+        }
+
+        var pairs: [(oldIndex: Int, newIndex: Int)] = []
+        var oldIndex = oldCount
+        var newIndex = newCount
+
+        while oldIndex > 0, newIndex > 0 {
+            if oldCharacters[oldIndex - 1] == newCharacters[newIndex - 1] {
+                pairs.append((oldIndex - 1, newIndex - 1))
+                oldIndex -= 1
+                newIndex -= 1
+            } else if lengths[oldIndex - 1][newIndex] > lengths[oldIndex][newIndex - 1]
+                || (lengths[oldIndex - 1][newIndex] == lengths[oldIndex][newIndex - 1] && oldIndex >= newIndex) {
+                oldIndex -= 1
+            } else {
+                newIndex -= 1
+            }
+        }
+
+        return pairs.reversed()
+    }
+
+    private static func driftOffsetX(index: Int, count: Int, changeRatio: CGFloat, xScale: CGFloat) -> CGFloat {
+        guard count > 1 else { return 0 }
+
+        let progress = CGFloat(index) / CGFloat(count - 1)
+        return (progress - 0.5) * 8 * xScale * changeRatio
+    }
+}
+
+private struct CalligraphCharacterItem: Identifiable, Equatable {
+    let id: Int
+    let character: Character
+    let driftX: CGFloat
+}
+
+private struct CalligraphCharacterTransitionModifier: ViewModifier {
+    let opacity: Double
+    let blurRadius: CGFloat
+    let scale: CGFloat
+    let offsetX: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(opacity)
+            .blur(radius: blurRadius)
+            .scaleEffect(scale)
+            .offset(x: offsetX)
+    }
+}
+
 struct GalleryAlbumStrip: View {
     let diaries: [VideoDiary]
     let albums: [VideoAlbum]
     let selectedAlbumID: VideoAlbum.ID?
+    var hiddenAlbumID: VideoAlbum.ID? = nil
     let xScale: CGFloat
-    var selectedPointerOffsetY: CGFloat = 0
     let onAddAlbum: () -> Void
     let onSelectAlbum: (VideoAlbum.ID) -> Void
+    var onLongPressAlbum: (VideoAlbum.ID) -> Void = { _ in }
 
     private var albumItems: [GalleryAlbumDisplayItem] {
-        let realItems = albums.compactMap { album -> GalleryAlbumDisplayItem? in
-            guard let coverID = album.coverDiaryID ?? album.diaryIDs.first,
-                  let coverDiary = diaries.first(where: { $0.id == coverID }) else {
-                return nil
-            }
+        albums.map { album -> GalleryAlbumDisplayItem in
+            let coverDiary = album.coverDiaryID.flatMap { coverID in
+                diaries.first { $0.id == coverID }
+            } ?? album.diaryIDs.compactMap { diaryID in
+                diaries.first { $0.id == diaryID }
+            }.first
 
             return GalleryAlbumDisplayItem(
                 id: "album-\(album.id.uuidString)",
                 albumID: album.id,
                 title: album.name,
+                coverImageData: album.coverImageData,
                 coverDiary: coverDiary
             )
         }
-
-        let representedDiaryIDs = Set(albums.flatMap(\.diaryIDs))
-        let fillerCount = max(0, 4 - realItems.count)
-        let fillerItems = diaries.filter { diary in
-            !representedDiaryIDs.contains(diary.id)
-        }.prefix(fillerCount).map { diary in
-            GalleryAlbumDisplayItem(
-                id: "diary-\(diary.id.uuidString)",
-                albumID: diary.id,
-                title: albumTitle(for: diary),
-                coverDiary: diary
-            )
-        }
-
-        return realItems + fillerItems
     }
 
     var body: some View {
@@ -297,18 +577,35 @@ struct GalleryAlbumStrip: View {
                 ForEach(albumItems) { item in
                     let isSelected = item.albumID == selectedAlbumID
                     let isDimmed = selectedAlbumID != nil && item.albumID != selectedAlbumID
+                    let isHidden = item.albumID == hiddenAlbumID
                     GalleryAlbumItem(
                         title: item.title,
+                        coverImageData: item.coverImageData,
                         coverDiary: item.coverDiary,
                         size: 70 * xScale,
                         isSelected: isSelected,
                         isDimmed: isDimmed,
-                        selectedPointerOffsetY: selectedPointerOffsetY,
                         action: {
                             guard let albumID = item.albumID else { return }
                             onSelectAlbum(albumID)
+                        },
+                        longPressAction: {
+                            guard let albumID = item.albumID else { return }
+                            onLongPressAlbum(albumID)
                         }
                     )
+                    .opacity(isHidden ? 0 : 1)
+                    .allowsHitTesting(!isHidden)
+                    .background {
+                        if let albumID = item.albumID {
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: GalleryAlbumFramePreferenceKey.self,
+                                    value: [albumID: proxy.frame(in: .named(GalleryAddAlbumMorphCoordinateSpace.name))]
+                                )
+                            }
+                        }
+                    }
                 }
             }
             .padding(.leading, 20 * xScale)
@@ -317,20 +614,14 @@ struct GalleryAlbumStrip: View {
         .scrollClipDisabled()
     }
 
-    private func albumTitle(for diary: VideoDiary) -> String {
-        let words = diary.title.split(separator: " ")
-        guard let first = words.first else {
-            return "Album"
-        }
-        return String(first)
-    }
 }
 
 private struct GalleryAlbumDisplayItem: Identifiable {
     let id: String
     let albumID: VideoAlbum.ID?
     let title: String
-    let coverDiary: VideoDiary
+    let coverImageData: Data?
+    let coverDiary: VideoDiary?
 }
 
 private struct GalleryAddAlbumPlaceholder: View {
@@ -397,31 +688,49 @@ struct MorphingAlbumCardShell: View {
 
 private struct GalleryAlbumItem: View {
     let title: String
-    let coverDiary: VideoDiary
+    let coverImageData: Data?
+    let coverDiary: VideoDiary?
     let size: CGFloat
     let isSelected: Bool
     let isDimmed: Bool
-    let selectedPointerOffsetY: CGFloat
     let action: () -> Void
+    let longPressAction: () -> Void
 
     private var coverSize: CGFloat {
-        size * (64 / 70)
+        size * (66 / 70)
+    }
+
+    private var outerCornerRadius: CGFloat {
+        size * (10 / 70)
+    }
+
+    private var coverCornerRadius: CGFloat {
+        size * (8 / 70)
     }
 
     var body: some View {
-        Button(action: action) {
-            ZStack(alignment: .top) {
-                VStack(spacing: 0) {
-                    ZStack {
-                        Circle()
-                            .fill(.ultraThinMaterial)
-                            .overlay(
-                                Circle()
-                                    .fill(Color.white.opacity(0.46))
-                                    .blendMode(.plusLighter)
-                            )
-                            .shadow(color: .black.opacity(0.08), radius: 28, y: 10)
+        ZStack(alignment: .top) {
+            VStack(spacing: 0) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: outerCornerRadius, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: outerCornerRadius, style: .continuous)
+                                .fill(Color.white.opacity(0.46))
+                                .blendMode(.plusLighter)
+                        )
+                        .frame(width: size, height: size)
+                        .shadow(color: .black.opacity(0.08), radius: 10 * (size / 70), y: 2 * (size / 70))
 
+                    if let coverImageData, let image = UIImage(data: coverImageData) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: coverSize, height: coverSize)
+                            .saturation(isDimmed ? 0.58 : 1)
+                            .opacity(isDimmed ? 0.78 : 1)
+                            .clipShape(RoundedRectangle(cornerRadius: coverCornerRadius, style: .continuous))
+                    } else if let coverDiary {
                         GalleryThumbnailView(
                             url: coverDiary.videoURL,
                             fallbackTint: coverDiary.fallbackTint,
@@ -431,52 +740,71 @@ private struct GalleryAlbumItem: View {
                         .saturation(isDimmed ? 0.58 : 1)
                         .opacity(isDimmed ? 0.78 : 1)
                         .blur(radius: 0)
-                        .clipShape(Circle())
-
-                        if isDimmed {
-                            Circle()
-                                .fill(Color.white.opacity(0.16))
-                                .frame(width: coverSize, height: coverSize)
-                        }
-
-                        if isSelected {
-                            Circle()
-                                .stroke(Color(red: 0.36, green: 0.62, blue: 1).opacity(0.95), lineWidth: max(1.5, size * (2 / 70)))
-                                .frame(width: size, height: size)
-                        }
+                        .clipShape(RoundedRectangle(cornerRadius: coverCornerRadius, style: .continuous))
+                    } else {
+                        GalleryEmptyAlbumCover(
+                            size: coverSize,
+                            cornerRadius: coverCornerRadius,
+                            isDimmed: isDimmed
+                        )
                     }
-                    .frame(width: size, height: size)
 
-                    Text(title)
-                        .font(.system(size: size * (14 / 70), weight: .regular))
-                        .tracking(size * (0.14 / 70))
-                        .foregroundStyle(isDimmed ? Color(white: 0.46) : Color(white: 0.24))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(width: size * (67 / 70), height: size * (22 / 70), alignment: .top)
-                        .frame(width: size, height: size * (22 / 70), alignment: .top)
-                        .offset(y: size * (2.0 / 70))
-                }
-                .frame(width: size, height: size * (92 / 70), alignment: .top)
+                    if isDimmed {
+                        RoundedRectangle(cornerRadius: coverCornerRadius, style: .continuous)
+                            .fill(Color.white.opacity(0.16))
+                            .frame(width: coverSize, height: coverSize)
+                    }
 
-                if isSelected {
-                    GallerySelectedAlbumPointer()
-                        .fill(Color(red: 0.996, green: 0.996, blue: 0.996))
-                        .frame(width: size * (30 / 70), height: size * (26 / 70))
-                        .mask(alignment: .top) {
-                            Rectangle()
-                                .frame(width: size * (30 / 70), height: size * (14 / 70))
-                        }
-                        .offset(y: size * (104 / 70) + selectedPointerOffsetY)
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: outerCornerRadius, style: .continuous)
+                            .stroke(Color(red: 0.36, green: 0.62, blue: 1).opacity(0.95), lineWidth: max(1.5, size * (2 / 70)))
+                            .frame(width: size, height: size)
+                    }
                 }
+                .frame(width: size, height: size)
+
+                Text(title)
+                    .font(.system(size: size * (14 / 70), weight: .regular))
+                    .tracking(size * (0.14 / 70))
+                    .foregroundStyle(isDimmed ? Color(white: 0.46) : Color(white: 0.24))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(width: size * (67 / 70), height: size * (22 / 70), alignment: .top)
+                    .frame(width: size, height: size * (22 / 70), alignment: .top)
+                    .offset(y: size * (2.0 / 70))
             }
-            .frame(width: size, height: size * (118 / 70), alignment: .top)
+            .frame(width: size, height: size * (92 / 70), alignment: .top)
+
         }
-        .buttonStyle(.plain)
+        .frame(width: size, height: size * (118 / 70), alignment: .top)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: action)
+        .onLongPressGesture(minimumDuration: 0.30, maximumDistance: 22, perform: longPressAction)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: title))
+        .accessibilityAddTraits(.isButton)
     }
 }
 
-private struct GallerySelectedAlbumPointer: Shape {
+private struct GalleryEmptyAlbumCover: View {
+    let size: CGFloat
+    let cornerRadius: CGFloat
+    let isDimmed: Bool
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(Color(white: isDimmed ? 0.86 : 0.90))
+            .overlay {
+                Image(systemName: "rectangle.stack")
+                    .font(.system(size: size * 0.28, weight: .regular))
+                    .foregroundStyle(Color(white: isDimmed ? 0.60 : 0.48))
+            }
+            .frame(width: size, height: size)
+            .opacity(isDimmed ? 0.78 : 1)
+    }
+}
+
+struct GallerySelectedAlbumPointer: Shape {
     func path(in rect: CGRect) -> Path {
         let scaleX = rect.width / 30
         let scaleY = rect.height / 26
@@ -519,8 +847,27 @@ private struct GallerySelectedAlbumPointer: Shape {
     }
 }
 
+struct GalleryAlbumFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [VideoAlbum.ID: CGRect] = [:]
+
+    static func reduce(value: inout [VideoAlbum.ID: CGRect], nextValue: () -> [VideoAlbum.ID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+    }
+}
+
+enum GalleryAlbumComposerLeadingAction: Equatable {
+    case close
+    case delete
+}
+
 struct GalleryAlbumAddMorphOverlay: View {
     @Binding var name: String
+    let coverImageData: Data?
+    let coverDiary: VideoDiary?
+    let collapsedAlbumCoverImageData: Data?
+    let collapsedAlbumCoverDiary: VideoDiary?
+    let title: String
+    let leadingAction: GalleryAlbumComposerLeadingAction
     let isExpanded: Bool
     let contentOpacity: Double
     let collapsedFrame: CGRect?
@@ -530,7 +877,9 @@ struct GalleryAlbumAddMorphOverlay: View {
     let xScale: CGFloat
     let yScale: CGFloat
     let onClose: () -> Void
+    let onPickCover: () -> Void
     let onNext: () -> Void
+    let onDelete: () -> Void
 
     private var collapsedCenter: CGPoint {
         guard let collapsedFrame else {
@@ -555,7 +904,7 @@ struct GalleryAlbumAddMorphOverlay: View {
     }
 
     private var shellCornerRadius: CGFloat {
-        35 * xScale
+        10 * xScale
     }
 
     private var shellOverlayColor: Color {
@@ -565,11 +914,15 @@ struct GalleryAlbumAddMorphOverlay: View {
     }
 
     private var shellShadowRadius: CGFloat {
-        isExpanded ? 36 * xScale : 28 * xScale
+        isExpanded ? 36 * xScale : 10 * xScale
     }
 
     private var shellShadowYOffset: CGFloat {
-        isExpanded ? 13 * yScale : 10 * xScale
+        isExpanded ? 13 * yScale : 1 * xScale
+    }
+
+    private var collapsedCoverSize: CGFloat {
+        66 * xScale
     }
 
     var body: some View {
@@ -585,19 +938,57 @@ struct GalleryAlbumAddMorphOverlay: View {
             .position(shellCenter)
             .allowsHitTesting(false)
 
-            Image(systemName: "plus")
-                .font(.system(size: 16 * xScale, weight: .semibold))
-                .foregroundStyle(Color.black.opacity(0.28))
+            if let collapsedAlbumCoverImageData,
+               let image = UIImage(data: collapsedAlbumCoverImageData) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: collapsedCoverSize, height: collapsedCoverSize)
+                    .clipShape(RoundedRectangle(cornerRadius: 8 * xScale, style: .continuous))
+                    .position(collapsedCenter)
+                    .opacity(isExpanded ? 0 : 1)
+                    .allowsHitTesting(false)
+            } else if let collapsedAlbumCoverDiary {
+                GalleryThumbnailView(
+                    url: collapsedAlbumCoverDiary.videoURL,
+                    fallbackTint: collapsedAlbumCoverDiary.fallbackTint,
+                    targetSize: CGSize(width: collapsedCoverSize * 2, height: collapsedCoverSize * 2)
+                )
+                .frame(width: collapsedCoverSize, height: collapsedCoverSize)
+                .clipShape(RoundedRectangle(cornerRadius: 8 * xScale, style: .continuous))
                 .position(collapsedCenter)
                 .opacity(isExpanded ? 0 : 1)
                 .allowsHitTesting(false)
+            } else if leadingAction == .delete {
+                GalleryEmptyAlbumCover(
+                    size: collapsedCoverSize,
+                    cornerRadius: 8 * xScale,
+                    isDimmed: false
+                )
+                .position(collapsedCenter)
+                .opacity(isExpanded ? 0 : 1)
+                .allowsHitTesting(false)
+            } else {
+                Image(systemName: "plus")
+                    .font(.system(size: 16 * xScale, weight: .semibold))
+                    .foregroundStyle(Color.black.opacity(0.28))
+                    .position(collapsedCenter)
+                    .opacity(isExpanded ? 0 : 1)
+                    .allowsHitTesting(false)
+            }
 
             GalleryAddAlbumComposerContent(
                 name: $name,
+                coverImageData: coverImageData,
+                coverDiary: coverDiary,
+                title: title,
+                leadingAction: leadingAction,
                 xScale: xScale,
                 yScale: yScale,
                 onClose: onClose,
-                onNext: onNext
+                onPickCover: onPickCover,
+                onNext: onNext,
+                onDelete: onDelete
             )
             .frame(width: expandedContentFrame.width, height: expandedContentFrame.height, alignment: .topLeading)
             .position(x: expandedContentFrame.midX, y: expandedContentFrame.midY)
@@ -609,10 +1000,16 @@ struct GalleryAlbumAddMorphOverlay: View {
 
 struct GalleryAddAlbumComposerContent: View {
     @Binding var name: String
+    let coverImageData: Data?
+    let coverDiary: VideoDiary?
+    let title: String
+    let leadingAction: GalleryAlbumComposerLeadingAction
     let xScale: CGFloat
     let yScale: CGFloat
     let onClose: () -> Void
+    let onPickCover: () -> Void
     let onNext: () -> Void
+    let onDelete: () -> Void
     @FocusState private var isNameFocused: Bool
 
     var body: some View {
@@ -622,19 +1019,33 @@ struct GalleryAddAlbumComposerContent: View {
         let saveWidth = 71 * xScale
         let saveHeight = 40 * xScale
         let coverSize = 200 * xScale
+        let coverCornerRadius = 30 * xScale
+        let coverShape = RoundedRectangle(cornerRadius: coverCornerRadius, style: .continuous)
         let inputWidth = 310 * xScale
         let inputHeight = 50 * xScale
 
         ZStack(alignment: .topLeading) {
-            GalleryGlassCircleActionButton(
-                systemName: "xmark",
-                size: closeSize,
-                symbolSize: 17 * xScale,
-                action: onClose
-            )
-            .position(x: 35 * xScale, y: 43 * yScale)
+            switch leadingAction {
+            case .close:
+                GalleryGlassCircleActionButton(
+                    systemName: "xmark",
+                    size: closeSize,
+                    symbolSize: 17 * xScale,
+                    action: onClose
+                )
+                .position(x: 35 * xScale, y: 43 * yScale)
+            case .delete:
+                GalleryGlassCircleActionButton(
+                    systemName: "trash",
+                    size: closeSize,
+                    symbolSize: 16 * xScale,
+                    foregroundColor: Color(red: 1, green: 0.231, blue: 0.188),
+                    action: onDelete
+                )
+                .position(x: 35 * xScale, y: 43 * yScale)
+            }
 
-            Text("New Album")
+            Text(title)
                 .font(.system(size: 20 * xScale, weight: .medium))
                 .tracking(0.2 * xScale)
                 .foregroundStyle(.black)
@@ -655,19 +1066,36 @@ struct GalleryAddAlbumComposerContent: View {
             )
             .position(x: 329.5 * xScale, y: 43 * yScale)
 
-            Button(action: {}) {
+            Button(action: onPickCover) {
                 ZStack {
-                    Circle()
+                    coverShape
                         .fill(Color(red: 0.855, green: 0.852, blue: 0.874))
 
-                    Text("Add Cover")
-                        .font(.system(size: 16 * xScale, weight: .medium))
-                        .tracking(0.16 * xScale)
-                        .foregroundStyle(Color(red: 0, green: 0.478, blue: 1))
-                        .frame(width: coverSize, alignment: .center)
-                        .offset(y: -0.5 * yScale)
+                    if let coverImageData, let image = UIImage(data: coverImageData) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: coverSize, height: coverSize)
+                            .clipShape(coverShape)
+                    } else if let coverDiary {
+                        GalleryThumbnailView(
+                            url: coverDiary.videoURL,
+                            fallbackTint: coverDiary.fallbackTint,
+                            targetSize: CGSize(width: coverSize * 2, height: coverSize * 2)
+                        )
+                        .frame(width: coverSize, height: coverSize)
+                        .clipShape(coverShape)
+                    } else {
+                        Text("Add Cover")
+                            .font(.system(size: 16 * xScale, weight: .medium))
+                            .tracking(0.16 * xScale)
+                            .foregroundStyle(Color(red: 0, green: 0.478, blue: 1))
+                            .frame(width: coverSize, alignment: .center)
+                            .offset(y: -0.5 * yScale)
+                    }
                 }
                 .frame(width: coverSize, height: coverSize)
+                .contentShape(coverShape)
             }
             .buttonStyle(.plain)
             .position(x: (90 + 100) * xScale, y: (103 + 100) * yScale)
@@ -701,6 +1129,494 @@ struct GalleryAddAlbumComposerContent: View {
             .position(x: (35 + 155) * xScale, y: (337 + 25 + 1) * yScale)
         }
         .frame(width: cardWidth, height: cardHeight, alignment: .topLeading)
+    }
+}
+
+struct GalleryAlbumCoverPicker: View {
+    @StateObject private var viewModel = AlbumCoverSelectionViewModel()
+    @State private var selectedItem: PhotoLibraryCoverItem?
+    @State private var isPreparingCover = false
+    @State private var coverError: String?
+
+    let onBack: () -> Void
+    let onSelectCover: (Data) -> Void
+
+    var body: some View {
+        AlbumCoverSelectionPage(
+            viewModel: viewModel,
+            selectedItem: $selectedItem,
+            isPreparingCover: isPreparingCover,
+            onCancel: onBack,
+            onNext: {
+                Task {
+                    await prepareCover()
+                }
+            }
+        )
+        .overlay(alignment: .bottom) {
+            if let coverError {
+                Text(coverError)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(.black.opacity(0.72), in: Capsule())
+                    .padding(.bottom, 26)
+                    .transition(.opacity)
+            }
+        }
+        .task {
+            await viewModel.load()
+        }
+    }
+
+    @MainActor
+    private func prepareCover() async {
+        guard let selectedItem else { return }
+        isPreparingCover = true
+        coverError = nil
+
+        do {
+            let imageData = try await viewModel.coverImageData(for: selectedItem)
+            onSelectCover(imageData)
+        } catch {
+            coverError = "Unable to load this cover."
+        }
+
+        isPreparingCover = false
+    }
+}
+
+struct PhotoLibraryCoverItem: Identifiable, Equatable {
+    let asset: PHAsset
+
+    static func == (lhs: PhotoLibraryCoverItem, rhs: PhotoLibraryCoverItem) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    var id: String {
+        asset.localIdentifier
+    }
+
+    var isVideo: Bool {
+        asset.mediaType == .video
+    }
+}
+
+@MainActor
+final class AlbumCoverSelectionViewModel: ObservableObject {
+    enum State: Equatable {
+        case loading
+        case ready
+        case denied
+        case empty
+        case failed
+    }
+
+    @Published private(set) var state: State = .loading
+    @Published private(set) var items: [PhotoLibraryCoverItem] = []
+
+    private let imageManager = PHCachingImageManager()
+
+    func load() async {
+        state = .loading
+        items = []
+
+        let status = await requestAuthorizationIfNeeded()
+        guard status == .authorized || status == .limited else {
+            state = .denied
+            return
+        }
+
+        let options = PHFetchOptions()
+        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        options.predicate = NSCompoundPredicate(orPredicateWithSubpredicates: [
+            NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue),
+            NSPredicate(format: "mediaType == %d", PHAssetMediaType.video.rawValue)
+        ])
+
+        let result = PHAsset.fetchAssets(with: options)
+        var nextItems: [PhotoLibraryCoverItem] = []
+        result.enumerateObjects { asset, _, _ in
+            nextItems.append(PhotoLibraryCoverItem(asset: asset))
+        }
+
+        items = nextItems
+        state = nextItems.isEmpty ? .empty : .ready
+    }
+
+    func coverImageData(for item: PhotoLibraryCoverItem) async throws -> Data {
+        if item.isVideo {
+            return try await videoCoverImageData(for: item)
+        }
+
+        let image = try await photoCoverImage(for: item)
+        return try AlbumCoverImageRenderer.coverImageData(from: image)
+    }
+
+    private func photoCoverImage(for item: PhotoLibraryCoverItem) async throws -> UIImage {
+        try await withCheckedThrowingContinuation { continuation in
+            let options = PHImageRequestOptions()
+            options.deliveryMode = .highQualityFormat
+            options.resizeMode = .exact
+            options.isNetworkAccessAllowed = true
+
+            imageManager.requestImageDataAndOrientation(for: item.asset, options: options) { data, _, _, info in
+                if let error = info?[PHImageErrorKey] as? Error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                guard let data, let image = UIImage(data: data) else {
+                    continuation.resume(throwing: AlbumCoverSelectionError.unavailableAsset)
+                    return
+                }
+
+                continuation.resume(returning: image)
+            }
+        }
+    }
+
+    private func videoCoverImageData(for item: PhotoLibraryCoverItem) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            let options = PHVideoRequestOptions()
+            options.deliveryMode = .highQualityFormat
+            options.isNetworkAccessAllowed = true
+
+            imageManager.requestAVAsset(forVideo: item.asset, options: options) { asset, _, info in
+                if let error = info?[PHImageErrorKey] as? Error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                guard let asset else {
+                    continuation.resume(throwing: AlbumCoverSelectionError.unavailableAsset)
+                    return
+                }
+
+                Task {
+                    do {
+                        let imageData = try await AlbumCoverImageRenderer.coverImageData(from: asset)
+                        continuation.resume(returning: imageData)
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+        }
+    }
+
+    private func requestAuthorizationIfNeeded() async -> PHAuthorizationStatus {
+        let current = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard current == .notDetermined else {
+            return current
+        }
+
+        return await withCheckedContinuation { continuation in
+            PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
+                continuation.resume(returning: status)
+            }
+        }
+    }
+
+}
+
+enum AlbumCoverImageRenderer {
+    static func coverImageData(forVideoAt url: URL) async throws -> Data {
+        let asset = AVURLAsset(url: url)
+        return try await coverImageData(from: asset)
+    }
+
+    static func coverImageData(from asset: AVAsset) async throws -> Data {
+        let image = try await videoCoverImage(from: asset)
+        return try coverImageData(from: image)
+    }
+
+    static func coverImageData(from image: UIImage) throws -> Data {
+        guard let imageData = image.albumCoverJPEGData() else {
+            throw AlbumCoverSelectionError.unavailableAsset
+        }
+
+        return imageData
+    }
+
+    private static func videoCoverImage(from asset: AVAsset) async throws -> UIImage {
+        let duration = (try? await asset.load(.duration)) ?? .zero
+        let durationSeconds = CMTimeGetSeconds(duration)
+        let upperBound = max(0, durationSeconds.isFinite ? durationSeconds - min(0.05, durationSeconds * 0.1) : 0)
+        let seconds = upperBound > 0 ? min(0.8, upperBound) : 0
+
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = CMTime(seconds: 0.25, preferredTimescale: 600)
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.25, preferredTimescale: 600)
+        generator.maximumSize = CGSize(width: 1200, height: 1200)
+
+        let time = CMTime(seconds: seconds, preferredTimescale: 600)
+        let result = try await generator.image(at: time)
+        return UIImage(cgImage: result.image)
+    }
+}
+
+private enum AlbumCoverSelectionError: Error {
+    case unavailableAsset
+}
+
+private struct AlbumCoverSelectionPage: View {
+    @ObservedObject var viewModel: AlbumCoverSelectionViewModel
+    @Binding var selectedItem: PhotoLibraryCoverItem?
+    let isPreparingCover: Bool
+    let onCancel: () -> Void
+    let onNext: () -> Void
+
+    var body: some View {
+        GeometryReader { _ in
+            let realScreenSize = UIScreen.main.bounds.size
+            let screenWidth = realScreenSize.width
+            let screenHeight = realScreenSize.height
+            let designWidth: CGFloat = 420
+            let designHeight: CGFloat = 912
+            let xScale = screenWidth / designWidth
+            let yScale = screenHeight / designHeight
+            let buttonSize = 44 * xScale
+            let buttonTop = 52 * yScale + 16 * yScale
+            let buttonCenterY = buttonTop + buttonSize / 2
+            let gridItemSize = (screenWidth - 4) / 3
+
+            ZStack(alignment: .topLeading) {
+                Color.white.ignoresSafeArea()
+
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.fixed(gridItemSize), spacing: 2), count: 3),
+                        spacing: 2
+                    ) {
+                        ForEach(viewModel.items) { item in
+                            AlbumCoverSelectionTile(
+                                item: item,
+                                isSelected: selectedItem?.id == item.id,
+                                size: gridItemSize
+                            )
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selectedItem = item
+                            }
+                        }
+                    }
+                    .padding(.top, 0)
+                    .frame(width: screenWidth, alignment: .top)
+                }
+
+                if viewModel.state != .ready {
+                    selectionStateView
+                        .frame(width: screenWidth, height: screenHeight)
+                }
+
+                GalleryGlassCircleActionButton(
+                    systemName: "chevron.left",
+                    size: buttonSize,
+                    symbolSize: 20 * xScale,
+                    action: onCancel
+                )
+                .position(x: (20 * xScale) + buttonSize / 2, y: buttonCenterY)
+
+                GalleryGlassCircleActionButton(
+                    systemName: "checkmark",
+                    size: buttonSize,
+                    symbolSize: 20 * xScale,
+                    isEnabled: selectedItem != nil && !isPreparingCover,
+                    action: onNext
+                )
+                .position(x: screenWidth - (20 * xScale) - buttonSize / 2, y: buttonCenterY)
+
+                if isPreparingCover {
+                    ProgressView()
+                        .tint(.white)
+                        .frame(width: buttonSize, height: buttonSize)
+                        .background(.black.opacity(0.18), in: Circle())
+                        .position(x: screenWidth - (20 * xScale) - buttonSize / 2, y: buttonCenterY)
+                }
+            }
+            .frame(width: screenWidth, height: screenHeight)
+            .ignoresSafeArea()
+        }
+        .ignoresSafeArea()
+    }
+
+    @ViewBuilder
+    private var selectionStateView: some View {
+        switch viewModel.state {
+        case .loading:
+            ProgressView()
+                .tint(.white)
+        case .denied:
+            Text("Photo access is needed to choose a cover.")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.black.opacity(0.72))
+                .padding(.horizontal, 30)
+                .multilineTextAlignment(.center)
+        case .empty:
+            Text("No photos or videos found.")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.black.opacity(0.72))
+        case .failed:
+            Text("Unable to load photos.")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.black.opacity(0.72))
+        case .ready:
+            EmptyView()
+        }
+    }
+}
+
+private struct AlbumCoverSelectionTile: View {
+    let item: PhotoLibraryCoverItem
+    let isSelected: Bool
+    let size: CGFloat
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            AlbumCoverThumbnailView(
+                asset: item.asset,
+                size: size
+            )
+
+            if item.isVideo {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 26, height: 20)
+                    .background(.black.opacity(0.34), in: Capsule())
+                    .padding(.leading, 8)
+                    .padding(.bottom, 8)
+                    .frame(width: size, height: size, alignment: .bottomLeading)
+            }
+
+            if isSelected {
+                Rectangle()
+                    .fill(Color(red: 0.93, green: 0.92, blue: 0.92).opacity(0.76))
+                    .frame(width: size, height: size)
+
+                Image(systemName: "checkmark.circle.fill")
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, Color(red: 0, green: 0.54, blue: 1))
+                    .font(.system(size: 23, weight: .semibold))
+                    .padding(.trailing, 8)
+                    .padding(.bottom, 8)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+    }
+}
+
+private struct AlbumCoverThumbnailView: View {
+    let asset: PHAsset
+    let size: CGFloat
+
+    @State private var thumbnail: UIImage?
+    @State private var requestID: PHImageRequestID?
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color(red: 0.85, green: 0.85, blue: 0.85))
+
+            if let thumbnail {
+                Image(uiImage: thumbnail)
+                    .resizable()
+                    .scaledToFill()
+            }
+        }
+        .frame(width: size, height: size)
+        .clipped()
+        .onAppear {
+            requestThumbnailIfNeeded()
+        }
+        .onDisappear {
+            cancelThumbnailRequest()
+        }
+        .onChange(of: asset.localIdentifier) { _, _ in
+            cancelThumbnailRequest()
+            thumbnail = nil
+            requestThumbnailIfNeeded()
+        }
+    }
+
+    private func requestThumbnailIfNeeded() {
+        guard thumbnail == nil, requestID == nil else {
+            return
+        }
+
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .opportunistic
+        options.resizeMode = .fast
+        options.isNetworkAccessAllowed = true
+
+        let targetLength = max(220, size * UIScreen.main.scale)
+        requestID = PHImageManager.default().requestImage(
+            for: asset,
+            targetSize: CGSize(width: targetLength, height: targetLength),
+            contentMode: .aspectFill,
+            options: options
+        ) { image, info in
+            let isCancelled = (info?[PHImageCancelledKey] as? Bool) == true
+            let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) == true
+
+            Task { @MainActor in
+                guard !isCancelled, let image else {
+                    requestID = nil
+                    return
+                }
+
+                thumbnail = image
+                if !isDegraded {
+                    requestID = nil
+                }
+            }
+        }
+    }
+
+    private func cancelThumbnailRequest() {
+        guard let requestID else {
+            return
+        }
+
+        PHImageManager.default().cancelImageRequest(requestID)
+        self.requestID = nil
+    }
+}
+
+private extension UIImage {
+    func albumCoverJPEGData(maxPixel: CGFloat = 1000) -> Data? {
+        guard size.width > 0, size.height > 0 else {
+            return nil
+        }
+
+        let side = min(max(size.width, size.height), maxPixel)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format)
+        let image = renderer.image { _ in
+            let aspectRatio = size.width / size.height
+            let drawSize: CGSize
+            if aspectRatio > 1 {
+                drawSize = CGSize(width: side * aspectRatio, height: side)
+            } else {
+                drawSize = CGSize(width: side, height: side / aspectRatio)
+            }
+
+            let drawRect = CGRect(
+                x: (side - drawSize.width) / 2,
+                y: (side - drawSize.height) / 2,
+                width: drawSize.width,
+                height: drawSize.height
+            )
+            draw(in: drawRect)
+        }
+
+        return image.jpegData(compressionQuality: 0.88)
     }
 }
 
@@ -789,11 +1705,6 @@ struct GalleryAlbumVideoPicker: View {
             let topControlSize = 44 * xScale
             let topControlSide = 20 * xScale
             let topControlCenterY = (52 * yScale) + topControlSize / 2 + 16 * yScale
-            let rowCount = max(1, Int(ceil(Double(diaries.count) / 3.0)))
-            let contentHeight = max(
-                screenHeight + 1,
-                gridTop + CGFloat(rowCount) * cardHeight + CGFloat(max(0, rowCount - 1)) * gridGap + 28 * yScale
-            )
 
             ZStack(alignment: .topLeading) {
                 Color(red: 0.996, green: 0.996, blue: 0.996)
@@ -824,8 +1735,9 @@ struct GalleryAlbumVideoPicker: View {
                     }
                     .frame(width: screenWidth, alignment: .leading)
                     .padding(.top, gridTop)
+                    .padding(.bottom, 28 * yScale)
                 }
-                .frame(width: screenWidth, height: contentHeight)
+                .frame(width: screenWidth, height: screenHeight)
 
                 Text(albumName)
                     .font(.system(size: 24 * xScale, weight: .semibold))
@@ -923,6 +1835,8 @@ struct GalleryVideoCard: View {
     let onTap: () -> Void
 
     @State private var bottomColor: Color
+    @State private var thumbnail: UIImage?
+    @State private var requestedURL: URL?
 
     init(diary: VideoDiary, width: CGFloat, height: CGFloat, column: Int, onTap: @escaping () -> Void) {
         self.diary = diary
@@ -938,11 +1852,15 @@ struct GalleryVideoCard: View {
             ZStack(alignment: .topLeading) {
                 bottomColor
 
-                GalleryThumbnailView(
-                    url: diary.videoURL,
-                    fallbackTint: diary.fallbackTint,
-                    targetSize: CGSize(width: width * 2, height: width * 2)
-                )
+                ZStack {
+                    diary.fallbackTint
+
+                    if let thumbnail {
+                        Image(uiImage: thumbnail)
+                            .resizable()
+                            .scaledToFill()
+                    }
+                }
                 .frame(width: width, height: width)
                 .mask(videoFadeMask)
                 .clipped()
@@ -965,11 +1883,24 @@ struct GalleryVideoCard: View {
             .clipShape(GalleryCardShape(column: column, radius: width * (3 / 138)))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(GalleryStaticButtonStyle())
         .task(id: diary.videoURL) {
-            guard let url = diary.videoURL else { return }
-            let sample = await VideoColorSampler.shared.sample(for: url, fallback: diary.fallbackTint)
-            bottomColor = sample.bottomColor
+            if requestedURL != diary.videoURL {
+                requestedURL = diary.videoURL
+                thumbnail = nil
+                bottomColor = diary.fallbackTint
+            }
+
+            let assets = await cachedGalleryAssetsWhenReady(
+                for: diary.videoURL,
+                fallback: diary.fallbackTint,
+                isReady: { $0.thumbnail != nil && $0.bottomColor != nil }
+            )
+
+            thumbnail = assets.thumbnail
+            if let derivedColor = assets.bottomColor {
+                bottomColor = derivedColor
+            }
         }
     }
 
@@ -985,6 +1916,12 @@ struct GalleryVideoCard: View {
             startPoint: .top,
             endPoint: .bottom
         )
+    }
+}
+
+private struct GalleryStaticButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
     }
 }
 
@@ -1064,6 +2001,7 @@ private struct GalleryThumbnailView: View {
     let targetSize: CGSize
 
     @State private var thumbnail: UIImage?
+    @State private var requestedURL: URL?
 
     var body: some View {
         ZStack {
@@ -1077,121 +2015,45 @@ private struct GalleryThumbnailView: View {
         }
         .clipped()
         .task(id: url) {
-            thumbnail = nil
-            thumbnail = await GalleryThumbnailLoader.shared.thumbnail(
+            if requestedURL != url {
+                requestedURL = url
+                thumbnail = nil
+            }
+
+            let assets = await cachedGalleryAssetsWhenReady(
                 for: url,
-                targetSize: targetSize
+                fallback: fallbackTint,
+                isReady: { $0.thumbnail != nil }
             )
+            thumbnail = assets.thumbnail
         }
     }
 }
 
-private actor GalleryThumbnailLoader {
-    static let shared = GalleryThumbnailLoader()
+private func cachedGalleryAssetsWhenReady(
+    for url: URL?,
+    fallback: Color,
+    isReady: (VideoDerivedGalleryAssets) -> Bool
+) async -> VideoDerivedGalleryAssets {
+    let retryDelays: [UInt64] = [0, 180_000_000, 360_000_000, 720_000_000, 1_200_000_000]
+    var latest = VideoDerivedGalleryAssets(thumbnail: nil, bottomColor: nil)
 
-    private var cache: [URL: UIImage] = [:]
-
-    func thumbnail(for url: URL?, targetSize: CGSize) async -> UIImage? {
-        guard let url else {
-            return nil
+    for delay in retryDelays {
+        if delay > 0 {
+            try? await Task.sleep(nanoseconds: delay)
         }
 
-        if let cached = cache[url] {
-            return cached
+        guard !Task.isCancelled else {
+            return latest
         }
 
-        guard !url.isFileURL || FileManager.default.isReadableFile(atPath: url.path) else {
-            return nil
-        }
-
-        let image: UIImage?
-        if let assetThumbnail = await makeAssetThumbnail(for: url, targetSize: targetSize) {
-            image = assetThumbnail
-        } else {
-            image = await makeQuickLookThumbnail(for: url, targetSize: targetSize)
-        }
-
-        if let image {
-            cache[url] = image
-        }
-        return image
-    }
-
-    private func makeAssetThumbnail(for url: URL, targetSize: CGSize) async -> UIImage? {
-        let asset = AVURLAsset(url: url)
-        let tracks = (try? await asset.load(.tracks)) ?? []
-        guard tracks.contains(where: { $0.mediaType == .video }) else {
-            return nil
-        }
-
-        let duration = (try? await asset.load(.duration)) ?? .zero
-        let durationSeconds = CMTimeGetSeconds(duration)
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.requestedTimeToleranceBefore = CMTime(seconds: 0.25, preferredTimescale: 600)
-        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.25, preferredTimescale: 600)
-        generator.maximumSize = CGSize(
-            width: max(320, targetSize.width),
-            height: max(320, targetSize.height)
-        )
-
-        for seconds in Self.thumbnailCandidateSeconds(durationSeconds: durationSeconds) {
-            let time = CMTime(seconds: seconds, preferredTimescale: 600)
-            if let image = autoreleasepool(invoking: { () -> UIImage? in
-                guard let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) else {
-                    return nil
-                }
-                return UIImage(cgImage: cgImage)
-            }) {
-                return image
-            }
-        }
-
-        return nil
-    }
-
-    private func makeQuickLookThumbnail(for url: URL, targetSize: CGSize) async -> UIImage? {
-        guard url.isFileURL else {
-            return nil
-        }
-
-        let scale = await MainActor.run { UIScreen.main.scale }
-        let request = QLThumbnailGenerator.Request(
-            fileAt: url,
-            size: CGSize(width: max(80, targetSize.width), height: max(80, targetSize.height)),
-            scale: scale,
-            representationTypes: [.thumbnail, .lowQualityThumbnail]
-        )
-
-        return await withCheckedContinuation { continuation in
-            QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { thumbnail, _ in
-                continuation.resume(returning: thumbnail?.uiImage)
-            }
+        latest = await VideoDerivedAssetStore.shared.cachedGalleryAssets(for: url, fallback: fallback)
+        if isReady(latest) {
+            return latest
         }
     }
 
-    private nonisolated static func thumbnailCandidateSeconds(durationSeconds: Double) -> [Double] {
-        guard durationSeconds.isFinite, durationSeconds > 0 else {
-            return [0]
-        }
-
-        let endPadding = min(0.05, durationSeconds * 0.1)
-        let upperBound = max(0, durationSeconds - endPadding)
-        let candidates = [
-            durationSeconds / 2,
-            min(0.8, upperBound),
-            durationSeconds * 0.25,
-            durationSeconds * 0.75,
-            0,
-            min(0.1, upperBound)
-        ]
-
-        return candidates.reduce(into: [Double]()) { result, seconds in
-            let clamped = min(max(0, seconds), upperBound)
-            guard !result.contains(where: { abs($0 - clamped) < 0.01 }) else { return }
-            result.append(clamped)
-        }
-    }
+    return latest
 }
 
 private struct GalleryCardTitleLabel: UIViewRepresentable {
@@ -1261,6 +2123,7 @@ private struct GalleryGlassCircleActionButton: View {
     let systemName: String
     let size: CGFloat
     let symbolSize: CGFloat
+    var foregroundColor: Color = .black
     var isEnabled = true
     let action: () -> Void
 
@@ -1270,7 +2133,7 @@ private struct GalleryGlassCircleActionButton: View {
             size: size,
             symbolSize: symbolSize,
             symbolWeight: .medium,
-            foregroundColor: .black,
+            foregroundColor: foregroundColor,
             isEnabled: isEnabled,
             action: action
         )
@@ -1290,18 +2153,10 @@ private struct GalleryGlassPillActionButton: View {
         if let backgroundColor {
             Button(action: action) {
                 ZStack {
-                    GlassEffectContainer(spacing: 0) {
-                        LiquidGlassCapsuleSurface(
-                            width: width,
-                            height: height,
-                            xScale: max(height / 44, 0.1),
-                            isEnabled: isEnabled
-                        )
-                    }
-
                     Capsule()
-                        .fill(backgroundColor)
-                        .opacity(isEnabled ? 0.82 : 0.34)
+                        .fill(backgroundColor.opacity(isEnabled ? 0.82 : 0.34))
+                        .frame(width: width, height: height)
+                        .glassEffect(.regular.interactive(), in: Capsule())
                         .allowsHitTesting(false)
 
                     Text(title)
@@ -1332,19 +2187,11 @@ private struct GalleryTopPlaceholderButton: View {
     let size: CGFloat
 
     var body: some View {
-        ZStack {
-            GlassEffectContainer(spacing: 0) {
-                LiquidGlassCapsuleSurface(
-                    width: size,
-                    height: size,
-                    xScale: max(size / 44, 0.1)
-                )
-            }
-
-            Image(systemName: "ellipsis")
-                .font(.system(size: max(17, size * 0.43), weight: .semibold))
-                .foregroundStyle(Color.black.opacity(0.80))
-        }
-        .frame(width: size, height: size)
+        Image(systemName: "ellipsis")
+            .font(.system(size: max(17, size * 0.43), weight: .semibold))
+            .foregroundStyle(Color.black.opacity(0.80))
+            .frame(width: size, height: size)
+            .contentShape(Circle())
+            .glassEffect(.regular, in: Circle())
     }
 }
