@@ -51,6 +51,8 @@ struct HomeView: View {
     @State private var albumComposerSourceCoverDiary: VideoDiary?
     @State private var isAddAlbumComposerPresented = false
     @State private var isAddAlbumComposerContentVisible = false
+    @State private var albumComposerProgress: CGFloat = 0
+    @State private var albumComposerTransitionID = 0
     @State private var isAlbumVideoPickerPresented = false
     @State private var isAlbumCoverPickerPresented = false
     @State private var shouldReturnToAlbumComposerAfterVideoPicker = false
@@ -73,8 +75,8 @@ struct HomeView: View {
 
     private static let homeScrollTopID = "home-scroll-top"
     private static let homeScrollTopThreshold: CGFloat = -6
-    private static let albumComposerOpenDelayNanoseconds: UInt64 = 16_000_000
-    private static let albumComposerResetDelayNanoseconds: UInt64 = 450_000_000
+    private static let albumComposerContentRevealDelayNanoseconds: UInt64 = 220_000_000
+    private static let albumComposerResetDelayNanoseconds: UInt64 = 360_000_000
 
     var body: some View {
         GeometryReader { geometry in
@@ -121,7 +123,7 @@ struct HomeView: View {
             let selectedAlbum = albums.first { $0.id == selectedAlbumID }
             let isEditingAlbumComposer = albumComposerMode == .edit
             let albumComposerCollapsedFrame = albumComposerSourceFrame
-                ?? addAlbumButtonFrame
+                ?? (albums.isEmpty ? nil : addAlbumButtonFrame)
             let addAlbumVisualCenter = addAlbumButtonFrame.map { frame in
                 CGPoint(x: frame.midX, y: frame.midY)
             } ?? addAlbumFallbackCenter
@@ -445,6 +447,7 @@ struct HomeView: View {
                     title: isEditingAlbumComposer ? "Edit Album" : "New Album",
                     leadingAction: isEditingAlbumComposer ? .delete : .close,
                     isExpanded: isAddAlbumComposerPresented,
+                    progress: albumComposerProgress,
                     contentOpacity: isAddAlbumComposerContentVisible ? 1 : 0,
                     collapsedFrame: albumComposerCollapsedFrame,
                     fallbackCollapsedCenter: addAlbumFallbackCenter,
@@ -477,13 +480,16 @@ struct HomeView: View {
                         selectedDiaryIDs: $selectedAlbumDiaryIDs,
                         onBack: {
                             let shouldReturnToComposer = shouldReturnToAlbumComposerAfterVideoPicker
+                            albumComposerTransitionID += 1
+                            let transitionID = albumComposerTransitionID
                             withAnimation(.snappy(duration: 0.28)) {
                                 isAlbumVideoPickerPresented = false
                                 isAddAlbumComposerPresented = shouldReturnToComposer
+                                albumComposerProgress = shouldReturnToComposer ? 1 : 0
                                 isAddAlbumComposerContentVisible = false
                             }
                             if shouldReturnToComposer {
-                                revealAddAlbumComposerContent()
+                                revealAddAlbumComposerContent(transitionID: transitionID)
                             } else {
                                 closeAddAlbumFlow()
                             }
@@ -679,9 +685,15 @@ struct HomeView: View {
             try? modelContext.save()
         }
 
-        withAnimation(.snappy(duration: 0.24)) {
+        albumComposerTransitionID += 1
+        let transitionID = albumComposerTransitionID
+
+        withAnimation(.easeOut(duration: 0.12)) {
             isAddAlbumComposerContentVisible = false
+        }
+        withAnimation(.snappy(duration: 0.32)) {
             isAddAlbumComposerPresented = false
+            albumComposerProgress = 0
             isAlbumVideoPickerPresented = false
             isAlbumCoverPickerPresented = false
             if selectedAlbumID == albumID {
@@ -689,7 +701,7 @@ struct HomeView: View {
             }
         }
 
-        resetAlbumComposerDraftAfterCollapse()
+        resetAlbumComposerDraftAfterCollapse(transitionID: transitionID)
     }
 
     @MainActor
@@ -941,8 +953,10 @@ struct HomeView: View {
 
     @MainActor
     private func showAddAlbumComposer() {
+        albumComposerTransitionID += 1
+        let transitionID = albumComposerTransitionID
         albumComposerMode = .add
-        albumComposerSourceFrame = addAlbumButtonFrame
+        albumComposerSourceFrame = albums.isEmpty ? nil : addAlbumButtonFrame
         albumComposerSourceCoverImageData = nil
         albumComposerSourceCoverDiary = nil
         draftAlbumName = ""
@@ -950,14 +964,16 @@ struct HomeView: View {
         draftAlbumCoverImageData = nil
         editingAlbumID = nil
         shouldReturnToAlbumComposerAfterVideoPicker = false
+        albumComposerProgress = 0
         withAnimation(.snappy(duration: 0.32)) {
             isAddAlbumComposerContentVisible = false
             isAlbumHeaderHidden = false
             isAddAlbumComposerPresented = true
+            albumComposerProgress = 1
             isAlbumVideoPickerPresented = false
             isAlbumCoverPickerPresented = false
         }
-        revealAddAlbumComposerContent()
+        revealAddAlbumComposerContent(transitionID: transitionID)
     }
 
     @MainActor
@@ -970,7 +986,7 @@ struct HomeView: View {
         }
 
         albumComposerMode = .edit
-        albumComposerSourceFrame = sourceFrame
+        albumComposerSourceFrame = pressedAlbumCoverFrame(from: sourceFrame)
         albumComposerSourceCoverImageData = album.coverImageData
         albumComposerSourceCoverDiary = albumCoverDiary(for: album)
         draftAlbumName = album.name
@@ -979,27 +995,31 @@ struct HomeView: View {
         editingAlbumID = albumID
         pendingDeleteAlbumID = nil
         shouldReturnToAlbumComposerAfterVideoPicker = false
+        albumComposerProgress = 0
+        albumComposerTransitionID += 1
+        let transitionID = albumComposerTransitionID
         isAddAlbumComposerContentVisible = false
         isAlbumHeaderHidden = false
         isAddAlbumComposerPresented = false
         isAlbumVideoPickerPresented = false
         isAlbumCoverPickerPresented = false
 
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: Self.albumComposerOpenDelayNanoseconds)
-            withAnimation(.snappy(duration: 0.32)) {
-                isAddAlbumComposerPresented = true
-            }
-            revealAddAlbumComposerContent()
+        withAnimation(.snappy(duration: 0.32)) {
+            isAddAlbumComposerPresented = true
+            albumComposerProgress = 1
         }
+        restoreAlbumComposerSourceFrame(sourceFrame, for: albumID, transitionID: transitionID)
+        revealAddAlbumComposerContent(transitionID: transitionID)
     }
 
     @MainActor
     private func showAlbumVideoPicker() {
         shouldReturnToAlbumComposerAfterVideoPicker = true
+        albumComposerTransitionID += 1
         withAnimation(.snappy(duration: 0.28)) {
             isAddAlbumComposerContentVisible = false
             isAddAlbumComposerPresented = false
+            albumComposerProgress = 0
             isAlbumCoverPickerPresented = false
             isAlbumVideoPickerPresented = true
         }
@@ -1021,6 +1041,7 @@ struct HomeView: View {
 
     @MainActor
     private func showAlbumVideoPicker(for album: VideoAlbum) {
+        albumComposerTransitionID += 1
         draftAlbumName = album.name
         selectedAlbumDiaryIDs = album.diaryIDs
         draftAlbumCoverImageData = album.coverImageData
@@ -1030,6 +1051,7 @@ struct HomeView: View {
             isAddAlbumComposerContentVisible = false
             isAlbumHeaderHidden = false
             isAddAlbumComposerPresented = false
+            albumComposerProgress = 0
             isAlbumCoverPickerPresented = false
             isAlbumVideoPickerPresented = true
         }
@@ -1094,23 +1116,31 @@ struct HomeView: View {
     @MainActor
     private func closeAddAlbumFlow() {
         let shouldDelayReset = isAddAlbumComposerPresented || isAlbumVideoPickerPresented || isAlbumCoverPickerPresented
-        withAnimation(.snappy(duration: 0.24)) {
+        albumComposerTransitionID += 1
+        let transitionID = albumComposerTransitionID
+        withAnimation(.easeOut(duration: 0.12)) {
             isAddAlbumComposerContentVisible = false
+        }
+        withAnimation(.snappy(duration: 0.32)) {
             isAddAlbumComposerPresented = false
+            albumComposerProgress = 0
             isAlbumVideoPickerPresented = false
             isAlbumCoverPickerPresented = false
         }
         if shouldDelayReset {
-            resetAlbumComposerDraftAfterCollapse()
+            resetAlbumComposerDraftAfterCollapse(transitionID: transitionID)
         } else {
             resetAlbumComposerDraft()
         }
     }
 
     @MainActor
-    private func resetAlbumComposerDraftAfterCollapse() {
+    private func resetAlbumComposerDraftAfterCollapse(transitionID: Int? = nil) {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: Self.albumComposerResetDelayNanoseconds)
+            if let transitionID, albumComposerTransitionID != transitionID {
+                return
+            }
             guard !isAddAlbumComposerPresented && !isAlbumVideoPickerPresented && !isAlbumCoverPickerPresented else {
                 return
             }
@@ -1142,11 +1172,33 @@ struct HomeView: View {
         )
     }
 
+    private func pressedAlbumCoverFrame(from sourceFrame: CGRect) -> CGRect {
+        let pressedScale: CGFloat = 0.965
+        let horizontalInset = sourceFrame.width * (1 - pressedScale) / 2
+        let verticalInset = sourceFrame.height * (1 - pressedScale) / 2
+        return sourceFrame.insetBy(dx: horizontalInset, dy: verticalInset)
+    }
+
     @MainActor
-    private func revealAddAlbumComposerContent() {
+    private func restoreAlbumComposerSourceFrame(_ sourceFrame: CGRect, for albumID: VideoAlbum.ID, transitionID: Int) {
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 260_000_000)
-            guard isAddAlbumComposerPresented else { return }
+            try? await Task.sleep(nanoseconds: 420_000_000)
+            guard albumComposerTransitionID == transitionID,
+                  editingAlbumID == albumID,
+                  albumComposerMode == .edit,
+                  isAddAlbumComposerPresented
+            else {
+                return
+            }
+            albumComposerSourceFrame = sourceFrame
+        }
+    }
+
+    @MainActor
+    private func revealAddAlbumComposerContent(transitionID: Int) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.albumComposerContentRevealDelayNanoseconds)
+            guard isAddAlbumComposerPresented && albumComposerTransitionID == transitionID else { return }
             withAnimation(.easeOut(duration: 0.12)) {
                 isAddAlbumComposerContentVisible = true
             }

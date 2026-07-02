@@ -12,12 +12,17 @@ struct GalleryView: View {
 
     @State private var isAddAlbumComposerPresented = false
     @State private var isAddAlbumComposerContentVisible = false
+    @State private var addAlbumComposerProgress: CGFloat = 0
+    @State private var addAlbumComposerTransitionID = 0
     @State private var isAlbumVideoPickerPresented = false
     @State private var isAlbumCoverPickerPresented = false
     @State private var draftAlbumName = ""
     @State private var selectedAlbumDiaryIDs: [VideoDiary.ID] = []
     @State private var draftAlbumCoverImageData: Data?
     @State private var addAlbumButtonFrame: CGRect?
+
+    private static let albumComposerContentRevealDelayNanoseconds: UInt64 = 220_000_000
+    private static let albumComposerResetDelayNanoseconds: UInt64 = 360_000_000
 
     var body: some View {
         GeometryReader { _ in
@@ -123,8 +128,9 @@ struct GalleryView: View {
                     title: "New Album",
                     leadingAction: .close,
                     isExpanded: isAddAlbumComposerPresented,
+                    progress: addAlbumComposerProgress,
                     contentOpacity: isAddAlbumComposerContentVisible ? 1 : 0,
-                    collapsedFrame: addAlbumButtonFrame,
+                    collapsedFrame: albums.isEmpty ? nil : addAlbumButtonFrame,
                     fallbackCollapsedCenter: addAlbumFallbackCenter,
                     expandedShellFrame: addAlbumShellFrame,
                     expandedContentFrame: addAlbumContentFrame,
@@ -151,12 +157,15 @@ struct GalleryView: View {
                         albumName: draftAlbumName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "New Album" : draftAlbumName,
                         selectedDiaryIDs: $selectedAlbumDiaryIDs,
                         onBack: {
+                            addAlbumComposerTransitionID += 1
+                            let transitionID = addAlbumComposerTransitionID
                             withAnimation(.snappy(duration: 0.28)) {
                                 isAlbumVideoPickerPresented = false
                                 isAddAlbumComposerPresented = true
+                                addAlbumComposerProgress = 1
                                 isAddAlbumComposerContentVisible = false
                             }
-                            revealAddAlbumComposerContent()
+                            revealAddAlbumComposerContent(transitionID: transitionID)
                         },
                         onSave: {
                             saveAlbum()
@@ -194,22 +203,28 @@ struct GalleryView: View {
     }
 
     private func showAddAlbumComposer() {
+        addAlbumComposerTransitionID += 1
+        let transitionID = addAlbumComposerTransitionID
         draftAlbumName = ""
         selectedAlbumDiaryIDs = []
         draftAlbumCoverImageData = nil
+        addAlbumComposerProgress = 0
         withAnimation(.snappy(duration: 0.32)) {
             isAddAlbumComposerContentVisible = false
             isAddAlbumComposerPresented = true
+            addAlbumComposerProgress = 1
             isAlbumVideoPickerPresented = false
             isAlbumCoverPickerPresented = false
         }
-        revealAddAlbumComposerContent()
+        revealAddAlbumComposerContent(transitionID: transitionID)
     }
 
     private func showAlbumVideoPicker() {
+        addAlbumComposerTransitionID += 1
         withAnimation(.snappy(duration: 0.28)) {
             isAddAlbumComposerContentVisible = false
             isAddAlbumComposerPresented = false
+            addAlbumComposerProgress = 0
             isAlbumCoverPickerPresented = false
             isAlbumVideoPickerPresented = true
         }
@@ -228,21 +243,37 @@ struct GalleryView: View {
     }
 
     private func closeAddAlbumFlow() {
-        withAnimation(.snappy(duration: 0.24)) {
+        addAlbumComposerTransitionID += 1
+        let transitionID = addAlbumComposerTransitionID
+        withAnimation(.easeOut(duration: 0.12)) {
             isAddAlbumComposerContentVisible = false
+        }
+        withAnimation(.snappy(duration: 0.32)) {
             isAddAlbumComposerPresented = false
+            addAlbumComposerProgress = 0
             isAlbumVideoPickerPresented = false
             isAlbumCoverPickerPresented = false
         }
-        draftAlbumName = ""
-        selectedAlbumDiaryIDs = []
-        draftAlbumCoverImageData = nil
+        resetAlbumComposerDraftAfterCollapse(transitionID: transitionID)
     }
 
-    private func revealAddAlbumComposerContent() {
+    private func resetAlbumComposerDraftAfterCollapse(transitionID: Int) {
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 260_000_000)
-            guard isAddAlbumComposerPresented else { return }
+            try? await Task.sleep(nanoseconds: Self.albumComposerResetDelayNanoseconds)
+            guard addAlbumComposerTransitionID == transitionID else { return }
+            guard !isAddAlbumComposerPresented && !isAlbumVideoPickerPresented && !isAlbumCoverPickerPresented else {
+                return
+            }
+            draftAlbumName = ""
+            selectedAlbumDiaryIDs = []
+            draftAlbumCoverImageData = nil
+        }
+    }
+
+    private func revealAddAlbumComposerContent(transitionID: Int) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.albumComposerContentRevealDelayNanoseconds)
+            guard isAddAlbumComposerPresented && addAlbumComposerTransitionID == transitionID else { return }
             withAnimation(.easeOut(duration: 0.12)) {
                 isAddAlbumComposerContentVisible = true
             }
@@ -628,10 +659,6 @@ private struct GalleryAddAlbumPlaceholder: View {
     let size: CGFloat
     let action: () -> Void
 
-    private var itemHeight: CGFloat {
-        size * (118 / 70)
-    }
-
     var body: some View {
         Button(action: action) {
             Color.clear
@@ -648,7 +675,6 @@ private struct GalleryAddAlbumPlaceholder: View {
                 )
             }
         }
-        .frame(width: size, height: itemHeight, alignment: .top)
     }
 }
 
@@ -700,6 +726,13 @@ private struct GalleryAlbumItem: View {
     let isDimmed: Bool
     let action: () -> Void
     let longPressAction: () -> Void
+    @State private var isLongPressing = false
+    @State private var isCompletingLongPress = false
+    @State private var longPressFeedbackGenerator: UIImpactFeedbackGenerator?
+
+    private static let longPressDuration: Double = 0.24
+    private static let longPressScale: CGFloat = 0.965
+    private static let longPressCompletionHoldNanoseconds: UInt64 = 360_000_000
 
     private var coverSize: CGFloat {
         size * (66 / 70)
@@ -711,6 +744,10 @@ private struct GalleryAlbumItem: View {
 
     private var coverCornerRadius: CGFloat {
         size * (8 / 70)
+    }
+
+    private var pressScaleAnchor: UnitPoint {
+        UnitPoint(x: 0.5, y: 35 / 118)
     }
 
     var body: some View {
@@ -782,9 +819,33 @@ private struct GalleryAlbumItem: View {
 
         }
         .frame(width: size, height: size * (118 / 70), alignment: .top)
+        .scaleEffect(isLongPressing ? Self.longPressScale : 1, anchor: pressScaleAnchor)
+        .animation(.linear(duration: Self.longPressDuration), value: isLongPressing)
         .contentShape(Rectangle())
         .onTapGesture(perform: action)
-        .onLongPressGesture(minimumDuration: 0.30, maximumDistance: 22, perform: longPressAction)
+        .onLongPressGesture(minimumDuration: Self.longPressDuration, maximumDistance: 26) {
+            isCompletingLongPress = true
+            isLongPressing = true
+            (longPressFeedbackGenerator ?? UIImpactFeedbackGenerator(style: .medium)).impactOccurred()
+            longPressFeedbackGenerator = nil
+            longPressAction()
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: Self.longPressCompletionHoldNanoseconds)
+                isCompletingLongPress = false
+                isLongPressing = false
+            }
+        } onPressingChanged: { isPressing in
+            if isPressing {
+                let generator = UIImpactFeedbackGenerator(style: .medium)
+                generator.prepare()
+                longPressFeedbackGenerator = generator
+                isCompletingLongPress = false
+            } else {
+                longPressFeedbackGenerator = nil
+            }
+            guard isPressing || !isCompletingLongPress else { return }
+            isLongPressing = isPressing
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: title))
         .accessibilityAddTraits(.isButton)
@@ -874,6 +935,7 @@ struct GalleryAlbumAddMorphOverlay: View {
     let title: String
     let leadingAction: GalleryAlbumComposerLeadingAction
     let isExpanded: Bool
+    let progress: CGFloat
     let contentOpacity: Double
     let collapsedFrame: CGRect?
     let fallbackCollapsedCenter: CGPoint
@@ -886,26 +948,44 @@ struct GalleryAlbumAddMorphOverlay: View {
     let onNext: () -> Void
     let onDelete: () -> Void
 
-    private var collapsedCenter: CGPoint {
-        guard let collapsedFrame else {
-            return fallbackCollapsedCenter
-        }
+    private var clampedProgress: CGFloat {
+        min(max(progress, 0), 1)
+    }
 
-        return CGPoint(x: collapsedFrame.midX, y: collapsedFrame.midY)
+    private var shellProgress: CGFloat {
+        smoothStep(clampedProgress)
+    }
+
+    private var collapsedSize: CGFloat {
+        70 * xScale
+    }
+
+    private var resolvedCollapsedFrame: CGRect {
+        collapsedFrame ?? CGRect(
+            x: fallbackCollapsedCenter.x - collapsedSize / 2,
+            y: fallbackCollapsedCenter.y - collapsedSize / 2,
+            width: collapsedSize,
+            height: collapsedSize
+        )
+    }
+
+    private var collapsedCenter: CGPoint {
+        CGPoint(x: resolvedCollapsedFrame.midX, y: resolvedCollapsedFrame.midY)
     }
 
     private var shellCenter: CGPoint {
-        isExpanded
-            ? CGPoint(x: expandedShellFrame.midX, y: expandedShellFrame.midY)
-            : collapsedCenter
+        CGPoint(
+            x: interpolate(resolvedCollapsedFrame.midX, expandedShellFrame.midX),
+            y: interpolate(resolvedCollapsedFrame.midY, expandedShellFrame.midY)
+        )
     }
 
     private var shellWidth: CGFloat {
-        isExpanded ? expandedShellFrame.width : 70 * xScale
+        interpolate(resolvedCollapsedFrame.width, expandedShellFrame.width)
     }
 
     private var shellHeight: CGFloat {
-        isExpanded ? expandedShellFrame.height : 70 * xScale
+        interpolate(resolvedCollapsedFrame.height, expandedShellFrame.height)
     }
 
     private var shellCornerRadius: CGFloat {
@@ -919,15 +999,25 @@ struct GalleryAlbumAddMorphOverlay: View {
     }
 
     private var shellShadowRadius: CGFloat {
-        isExpanded ? 36 * xScale : 10 * xScale
+        interpolate(10 * xScale, 36 * xScale)
     }
 
     private var shellShadowYOffset: CGFloat {
-        isExpanded ? 13 * yScale : 1 * xScale
+        interpolate(1 * xScale, 13 * yScale)
     }
 
     private var collapsedCoverSize: CGFloat {
-        66 * xScale
+        min(resolvedCollapsedFrame.width, resolvedCollapsedFrame.height) * (66 / 70)
+    }
+
+    private var collapsedVisualOpacity: Double {
+        let fadeProgress = smoothStep(normalizedProgress(clampedProgress, from: 0, to: 0.42))
+        return Double(1 - fadeProgress)
+    }
+
+    private var resolvedContentOpacity: Double {
+        let revealProgress = smoothStep(normalizedProgress(clampedProgress, from: 0.58, to: 1))
+        return contentOpacity * Double(revealProgress)
     }
 
     var body: some View {
@@ -951,7 +1041,7 @@ struct GalleryAlbumAddMorphOverlay: View {
                     .frame(width: collapsedCoverSize, height: collapsedCoverSize)
                     .clipShape(RoundedRectangle(cornerRadius: 8 * xScale, style: .continuous))
                     .position(collapsedCenter)
-                    .opacity(isExpanded ? 0 : 1)
+                    .opacity(collapsedVisualOpacity)
                     .allowsHitTesting(false)
             } else if let collapsedAlbumCoverDiary {
                 GalleryThumbnailView(
@@ -962,7 +1052,7 @@ struct GalleryAlbumAddMorphOverlay: View {
                 .frame(width: collapsedCoverSize, height: collapsedCoverSize)
                 .clipShape(RoundedRectangle(cornerRadius: 8 * xScale, style: .continuous))
                 .position(collapsedCenter)
-                .opacity(isExpanded ? 0 : 1)
+                .opacity(collapsedVisualOpacity)
                 .allowsHitTesting(false)
             } else if leadingAction == .delete {
                 GalleryEmptyAlbumCover(
@@ -971,14 +1061,14 @@ struct GalleryAlbumAddMorphOverlay: View {
                     isDimmed: false
                 )
                 .position(collapsedCenter)
-                .opacity(isExpanded ? 0 : 1)
+                .opacity(collapsedVisualOpacity)
                 .allowsHitTesting(false)
             } else {
                 Image(systemName: "plus")
                     .font(.system(size: 16 * xScale, weight: .semibold))
                     .foregroundStyle(Color.black.opacity(0.28))
                     .position(collapsedCenter)
-                    .opacity(isExpanded ? 0 : 1)
+                    .opacity(collapsedVisualOpacity)
                     .allowsHitTesting(false)
             }
 
@@ -997,9 +1087,25 @@ struct GalleryAlbumAddMorphOverlay: View {
             )
             .frame(width: expandedContentFrame.width, height: expandedContentFrame.height, alignment: .topLeading)
             .position(x: expandedContentFrame.midX, y: expandedContentFrame.midY)
-            .opacity(contentOpacity)
-            .allowsHitTesting(isExpanded && contentOpacity > 0.5)
+            .opacity(resolvedContentOpacity)
+            .allowsHitTesting(isExpanded && resolvedContentOpacity > 0.5)
         }
+    }
+
+    private func interpolate(_ collapsedValue: CGFloat, _ expandedValue: CGFloat) -> CGFloat {
+        collapsedValue + (expandedValue - collapsedValue) * shellProgress
+    }
+
+    private func normalizedProgress(_ progress: CGFloat, from start: CGFloat, to end: CGFloat) -> CGFloat {
+        guard end > start else {
+            return progress >= end ? 1 : 0
+        }
+        return min(max((progress - start) / (end - start), 0), 1)
+    }
+
+    private func smoothStep(_ progress: CGFloat) -> CGFloat {
+        let normalized = min(max(progress, 0), 1)
+        return normalized * normalized * (3 - 2 * normalized)
     }
 }
 
@@ -1119,15 +1225,15 @@ struct GalleryAddAlbumComposerContent: View {
                 .tracking(0.16 * xScale)
                 .foregroundStyle(.black)
                 .tint(Color(red: 0, green: 0.478, blue: 1))
+                .multilineTextAlignment(.center)
                 .textInputAutocapitalization(.words)
                 .submitLabel(.done)
                 .focused($isNameFocused)
                 .onSubmit {
                     isNameFocused = false
                 }
-                .padding(.leading, 20 * xScale)
-                .padding(.trailing, 28 * xScale)
-                .frame(width: inputWidth, height: inputHeight, alignment: .leading)
+                .padding(.horizontal, 24 * xScale)
+                .frame(width: inputWidth, height: inputHeight, alignment: .center)
                 .offset(y: -0.5 * yScale)
             }
             .frame(width: inputWidth, height: inputHeight)

@@ -28,6 +28,8 @@ struct DiaryDetailView: View {
     @State private var isShareMenuMounted = false
     @State private var isShareMenuExpanded = false
     @State private var isShareMenuContentVisible = false
+    @State private var shareMenuProgress: CGFloat = 0
+    @State private var shareMenuTransitionID = 0
     @State private var shareButtonFrame: CGRect?
     @State private var sharePayload: VideoDiarySharePayload?
     @State private var sampledBottomColor: Color
@@ -164,6 +166,7 @@ struct DiaryDetailView: View {
                 if isShareMenuMounted {
                     DetailShareMenuOverlay(
                         isExpanded: isShareMenuExpanded,
+                        progress: shareMenuProgress,
                         contentOpacity: isShareMenuContentVisible ? 1 : 0,
                         collapsedFrame: shareButtonFrame,
                         fallbackCollapsedFrame: fallbackShareButtonFrame(
@@ -475,15 +478,20 @@ struct DiaryDetailView: View {
         isShareMenuMounted = true
         isShareMenuContentVisible = false
         isShareMenuExpanded = false
+        shareMenuProgress = 0
+        shareMenuTransitionID += 1
+        let transitionID = shareMenuTransitionID
 
         Task { @MainActor in
             await Task.yield()
+            guard isShareMenuMounted && shareMenuTransitionID == transitionID else { return }
             withAnimation(.snappy(duration: 0.32)) {
                 isShareMenuExpanded = true
+                shareMenuProgress = 1
             }
 
             try? await Task.sleep(nanoseconds: 180_000_000)
-            guard isShareMenuMounted && isShareMenuExpanded else { return }
+            guard isShareMenuMounted && isShareMenuExpanded && shareMenuTransitionID == transitionID else { return }
             withAnimation(.easeOut(duration: 0.12)) {
                 isShareMenuContentVisible = true
             }
@@ -494,17 +502,22 @@ struct DiaryDetailView: View {
     private func closeShareMenu() {
         guard isShareMenuMounted else { return }
 
-        withAnimation(.easeOut(duration: 0.10)) {
+        shareMenuTransitionID += 1
+        let transitionID = shareMenuTransitionID
+
+        withAnimation(.easeOut(duration: 0.12)) {
             isShareMenuContentVisible = false
         }
-        withAnimation(.snappy(duration: 0.24)) {
+        withAnimation(.snappy(duration: 0.32)) {
             isShareMenuExpanded = false
+            shareMenuProgress = 0
         }
 
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            guard !isShareMenuExpanded else { return }
+            try? await Task.sleep(nanoseconds: 340_000_000)
+            guard !isShareMenuExpanded && shareMenuTransitionID == transitionID else { return }
             isShareMenuMounted = false
+            shareMenuProgress = 0
         }
     }
 
@@ -642,6 +655,7 @@ private struct DetailShareButtonFramePreferenceKey: PreferenceKey {
 
 private struct DetailShareMenuOverlay: View {
     let isExpanded: Bool
+    let progress: CGFloat
     let contentOpacity: Double
     let collapsedFrame: CGRect?
     let fallbackCollapsedFrame: CGRect
@@ -653,20 +667,47 @@ private struct DetailShareMenuOverlay: View {
     let onShareVideo: () -> Void
     let onShareNote: () -> Void
 
+    private var clampedProgress: CGFloat {
+        min(max(progress, 0), 1)
+    }
+
+    private var shellProgress: CGFloat {
+        smoothStep(clampedProgress)
+    }
+
+    private var iconOpacity: Double {
+        let fadeProgress = smoothStep(normalizedProgress(clampedProgress, from: 0, to: 0.38))
+        return Double(1 - fadeProgress)
+    }
+
+    private var resolvedContentOpacity: Double {
+        let revealProgress = smoothStep(normalizedProgress(clampedProgress, from: 0.58, to: 1))
+        return contentOpacity * Double(revealProgress)
+    }
+
+    private var resolvedCollapsedFrame: CGRect {
+        collapsedFrame ?? fallbackCollapsedFrame
+    }
+
     private var currentFrame: CGRect {
-        isExpanded ? expandedFrame : (collapsedFrame ?? fallbackCollapsedFrame)
+        CGRect(
+            x: interpolate(resolvedCollapsedFrame.minX, expandedFrame.minX),
+            y: interpolate(resolvedCollapsedFrame.minY, expandedFrame.minY),
+            width: interpolate(resolvedCollapsedFrame.width, expandedFrame.width),
+            height: interpolate(resolvedCollapsedFrame.height, expandedFrame.height)
+        )
     }
 
     private var shellCornerRadius: CGFloat {
-        (collapsedFrame ?? fallbackCollapsedFrame).height / 2
+        resolvedCollapsedFrame.height / 2
     }
 
     private var shellShadowRadius: CGFloat {
-        isExpanded ? 36 * xScale : 10 * xScale
+        interpolate(10 * xScale, 36 * xScale)
     }
 
     private var shellShadowYOffset: CGFloat {
-        isExpanded ? 13 * yScale : 1 * xScale
+        interpolate(1 * xScale, 13 * yScale)
     }
 
     var body: some View {
@@ -677,21 +718,14 @@ private struct DetailShareMenuOverlay: View {
                 .allowsHitTesting(isExpanded)
 
             LiquidGlassContainer(spacing: 0) {
-                if isExpanded {
-                    LiquidGlassRoundedSurface(
-                        width: currentFrame.width,
-                        height: currentFrame.height,
-                        cornerRadius: shellCornerRadius,
-                        xScale: xScale,
-                        shadowRadius: shellShadowRadius,
-                        shadowYOffset: shellShadowYOffset
-                    )
-                } else {
-                    Circle()
-                        .fill(.clear)
-                        .frame(width: currentFrame.width, height: currentFrame.height)
-                        .vimemberInteractiveGlass(in: Circle())
-                }
+                LiquidGlassRoundedSurface(
+                    width: currentFrame.width,
+                    height: currentFrame.height,
+                    cornerRadius: shellCornerRadius,
+                    xScale: xScale,
+                    shadowRadius: shellShadowRadius,
+                    shadowYOffset: shellShadowYOffset
+                )
             }
             .frame(width: currentFrame.width, height: currentFrame.height)
             .clipShape(RoundedRectangle(cornerRadius: shellCornerRadius, style: .continuous))
@@ -699,12 +733,12 @@ private struct DetailShareMenuOverlay: View {
             .allowsHitTesting(false)
 
             Image(systemName: "square.and.arrow.up")
-                .font(.system(size: max(18, (collapsedFrame ?? fallbackCollapsedFrame).height * 0.42), weight: .semibold))
+                .font(.system(size: max(18, resolvedCollapsedFrame.height * 0.42), weight: .semibold))
                 .symbolRenderingMode(.monochrome)
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .offset(y: -1 * xScale)
                 .position(x: collapsedCenter.x, y: collapsedCenter.y)
-                .opacity(isExpanded ? 0 : 1)
+                .opacity(iconOpacity)
                 .allowsHitTesting(false)
 
             DetailShareMenuContent(
@@ -716,14 +750,29 @@ private struct DetailShareMenuOverlay: View {
             )
             .frame(width: expandedFrame.width, height: expandedFrame.height, alignment: .topLeading)
             .position(x: expandedFrame.midX, y: expandedFrame.midY)
-            .opacity(contentOpacity)
-            .allowsHitTesting(isExpanded && contentOpacity > 0.5)
+            .opacity(resolvedContentOpacity)
+            .allowsHitTesting(isExpanded && resolvedContentOpacity > 0.5)
         }
     }
 
     private var collapsedCenter: CGPoint {
-        let frame = collapsedFrame ?? fallbackCollapsedFrame
-        return CGPoint(x: frame.midX, y: frame.midY)
+        CGPoint(x: resolvedCollapsedFrame.midX, y: resolvedCollapsedFrame.midY)
+    }
+
+    private func interpolate(_ collapsedValue: CGFloat, _ expandedValue: CGFloat) -> CGFloat {
+        collapsedValue + (expandedValue - collapsedValue) * shellProgress
+    }
+
+    private func normalizedProgress(_ progress: CGFloat, from start: CGFloat, to end: CGFloat) -> CGFloat {
+        guard end > start else {
+            return progress >= end ? 1 : 0
+        }
+        return min(max((progress - start) / (end - start), 0), 1)
+    }
+
+    private func smoothStep(_ progress: CGFloat) -> CGFloat {
+        let normalized = min(max(progress, 0), 1)
+        return normalized * normalized * (3 - 2 * normalized)
     }
 }
 
@@ -1984,18 +2033,13 @@ private struct DetailTopControls: View {
                         .vimemberInteractiveGlass(in: Circle())
                         .position(x: backButtonCenterX, y: centerY)
 
-                    Circle()
-                        .fill(.clear)
-                        .frame(width: buttonSize, height: buttonSize)
-                        .vimemberInteractiveGlass(in: Circle())
-                        .position(x: shareButtonCenterX, y: centerY)
-                        .opacity(isShareButtonHidden ? 0 : 1)
-                        .transaction { transaction in
-                            if isShareButtonHidden {
-                                transaction.animation = nil
-                                transaction.disablesAnimations = true
-                            }
-                        }
+                    if !isShareButtonHidden {
+                        Circle()
+                            .fill(.clear)
+                            .frame(width: buttonSize, height: buttonSize)
+                            .vimemberInteractiveGlass(in: Circle())
+                            .position(x: shareButtonCenterX, y: centerY)
+                    }
 
                     Capsule()
                         .fill(.clear)
@@ -2015,31 +2059,22 @@ private struct DetailTopControls: View {
             )
             .position(x: backButtonCenterX, y: centerY)
 
-            DetailGlassIconButton(
-                systemName: "square.and.arrow.up",
-                size: buttonSize,
-                symbolOffsetY: -1 * xScale,
-                action: onShare
-            )
-            .position(x: shareButtonCenterX, y: centerY)
-            .opacity(isShareButtonHidden ? 0 : 1)
-            .allowsHitTesting(!isShareButtonHidden)
-            .accessibilityHidden(isShareButtonHidden)
-            .transaction { transaction in
-                if isShareButtonHidden {
-                    transaction.animation = nil
-                    transaction.disablesAnimations = true
-                }
-            }
-            .preference(
-                key: DetailShareButtonFramePreferenceKey.self,
-                value: CGRect(
-                    x: shareButtonCenterX - buttonSize / 2,
-                    y: centerY - buttonSize / 2,
-                    width: buttonSize,
-                    height: buttonSize
+            if !isShareButtonHidden {
+                DetailGlassIconButton(
+                    systemName: "square.and.arrow.up",
+                    size: buttonSize,
+                    symbolOffsetY: -1 * xScale,
+                    action: onShare
                 )
-            )
+                .position(x: shareButtonCenterX, y: centerY)
+            }
+
+            Color.clear
+                .frame(width: 0, height: 0)
+                .preference(
+                    key: DetailShareButtonFramePreferenceKey.self,
+                    value: shareButtonResolvedFrame
+                )
 
             DetailMorphingActionButton(
                 progress: progress,
@@ -2064,6 +2099,15 @@ private struct DetailTopControls: View {
 
     private var shareButtonCenterX: CGFloat {
         morphingActionRightEdge - morphingActionWidth - buttonGap - buttonSize / 2
+    }
+
+    private var shareButtonResolvedFrame: CGRect {
+        CGRect(
+            x: shareButtonCenterX - buttonSize / 2,
+            y: centerY - buttonSize / 2,
+            width: buttonSize,
+            height: buttonSize
+        )
     }
 
     private var morphingActionWidth: CGFloat {
