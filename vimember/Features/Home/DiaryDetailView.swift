@@ -919,7 +919,7 @@ private struct DetailTextLayoutMetrics {
             fontSize: 16,
             lineHeight: 22,
             letterSpacing: 0.16,
-            paragraphSpacing: 16
+            paragraphSpacing: 0
         )
 
         return ceil(
@@ -1814,7 +1814,7 @@ private struct DetailTextPanel: View {
                 fontSize: 16,
                 lineHeight: 22,
                 letterSpacing: 0.16,
-                paragraphSpacing: 16,
+                paragraphSpacing: 0,
                 labelWidth: textWidth
             )
             .offset(y: interpolate(0, -4 * yScale) + bodyAnchorOffset + bodyPullDownOvershoot)
