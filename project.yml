@@ -2,7 +2,7 @@ name: vimember
 options:
   bundleIdPrefix: com.brycez021
   deploymentTarget:
-    iOS: "26.0"
+    iOS: "17.0"
   xcodeVersion: "16.4"
 settings:
   base:
@@ -13,7 +13,7 @@ targets:
   vimember:
     type: application
     platform: iOS
-    deploymentTarget: "26.0"
+    deploymentTarget: "17.0"
     sources:
       - path: vimember/App
       - path: vimember/Domain
