@@ -38,7 +38,10 @@ struct GalleryView: View {
             let albumStripTop = 134 * yScale
             let albumHeaderHeight = 244 * yScale
             let videoGridTop = 287 * yScale
-            let addAlbumFallbackCenter = CGPoint(x: 55 * xScale, y: albumStripTop + 35 * xScale)
+            let addAlbumFallbackCenter = CGPoint(
+                x: 55 * xScale,
+                y: albumStripTop + ((92 * xScale - 118 * xScale) / 2) + 35 * xScale
+            )
             let addAlbumShellFrame = CGRect(
                 x: 20 * xScale,
                 y: albumComposerTop + 13 * yScale,
@@ -130,7 +133,7 @@ struct GalleryView: View {
                     isExpanded: isAddAlbumComposerPresented,
                     progress: addAlbumComposerProgress,
                     contentOpacity: isAddAlbumComposerContentVisible ? 1 : 0,
-                    collapsedFrame: albums.isEmpty ? nil : addAlbumButtonFrame,
+                    collapsedFrame: addAlbumButtonFrame,
                     fallbackCollapsedCenter: addAlbumFallbackCenter,
                     expandedShellFrame: addAlbumShellFrame,
                     expandedContentFrame: addAlbumContentFrame,
@@ -675,6 +678,7 @@ private struct GalleryAddAlbumPlaceholder: View {
                 )
             }
         }
+        .frame(width: size, height: size * (118 / 70), alignment: .top)
     }
 }
 

@@ -102,7 +102,7 @@ struct HomeView: View {
             let selectedAlbumPointerTop: CGFloat = 147 * yScale + 104 * xScale - 21.5 * yScale
             let addAlbumFallbackCenter = CGPoint(
                 x: 55 * xScale,
-                y: albumHeaderOffsetY + 147 * yScale + 35 * xScale
+                y: albumHeaderOffsetY + 147 * yScale + ((92 * xScale - 118 * xScale) / 2) + 35 * xScale
             )
             let addAlbumShellFrame = CGRect(
                 x: 20 * xScale,
@@ -123,7 +123,7 @@ struct HomeView: View {
             let selectedAlbum = albums.first { $0.id == selectedAlbumID }
             let isEditingAlbumComposer = albumComposerMode == .edit
             let albumComposerCollapsedFrame = albumComposerSourceFrame
-                ?? (albums.isEmpty ? nil : addAlbumButtonFrame)
+                ?? addAlbumButtonFrame
             let addAlbumVisualCenter = addAlbumButtonFrame.map { frame in
                 CGPoint(x: frame.midX, y: frame.midY)
             } ?? addAlbumFallbackCenter
@@ -956,7 +956,7 @@ struct HomeView: View {
         albumComposerTransitionID += 1
         let transitionID = albumComposerTransitionID
         albumComposerMode = .add
-        albumComposerSourceFrame = albums.isEmpty ? nil : addAlbumButtonFrame
+        albumComposerSourceFrame = addAlbumButtonFrame
         albumComposerSourceCoverImageData = nil
         albumComposerSourceCoverDiary = nil
         draftAlbumName = ""
