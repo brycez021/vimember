@@ -156,7 +156,7 @@ struct HomeView: View {
                     }
                 }
             )
-            let galleryTitle = selectedAlbum?.name ?? "All Videos"
+            let galleryTitle = selectedAlbum?.name ?? (diaries.isEmpty ? "Add your first video" : "All Videos")
             let galleryItemCount = visibleDiaries.count + (isAlbumFilterActive ? 1 : 0)
             let galleryRowCount = max(1, Int(ceil(Double(galleryItemCount) / 3.0)))
             let galleryContentHeight = max(
@@ -207,16 +207,26 @@ struct HomeView: View {
                         .frame(width: screenWidth, height: 1)
 
                         ZStack(alignment: .topLeading) {
-                            CalligraphSectionTitle(galleryTitle, xScale: xScale)
-                                .background {
-                                    GeometryReader { proxy in
-                                        Color.clear.preference(
-                                            key: HomeContentTitleFramePreferenceKey.self,
-                                            value: proxy.frame(in: .named(GalleryAddAlbumMorphCoordinateSpace.name))
-                                        )
+                            HStack(alignment: .bottom, spacing: 12 * xScale) {
+                                CalligraphSectionTitle(galleryTitle, xScale: xScale)
+                                    .background {
+                                        GeometryReader { proxy in
+                                            Color.clear.preference(
+                                                key: HomeContentTitleFramePreferenceKey.self,
+                                                value: proxy.frame(in: .named(GalleryAddAlbumMorphCoordinateSpace.name))
+                                            )
+                                        }
                                     }
+
+                                Spacer(minLength: 12 * xScale)
+
+                                if isAlbumFilterActive && visibleDiaries.isEmpty {
+                                    HomeEmptyAlbumPrompt(xScale: xScale)
+                                        .offset(y: -1.5 * yScale)
                                 }
-                                .offset(x: 20 * xScale, y: 251 * yScale)
+                            }
+                            .frame(width: screenWidth - 40 * xScale, alignment: .leading)
+                            .offset(x: 20 * xScale, y: 251 * yScale)
 
                             if isGalleryMode {
                                 LazyVGrid(
@@ -936,15 +946,11 @@ struct HomeView: View {
         let finalName = trimmedName.isEmpty ? "New Album" : trimmedName
         let orderedIDs = uniqueOrderedIDs(diaryIDs)
 
-        guard let coverID = orderedIDs.first else {
-            return nil
-        }
-
         let albumRecord = VideoAlbumRecord(
             id: id,
             name: finalName,
             diaryIDs: orderedIDs,
-            coverDiaryID: coverID,
+            coverDiaryID: orderedIDs.first,
             coverImageData: coverImageData
         )
         modelContext.insert(albumRecord)
@@ -1214,10 +1220,6 @@ struct HomeView: View {
 
     @MainActor
     private func saveAlbumWithResolvedCover() async {
-        guard !selectedAlbumDiaryIDs.isEmpty else {
-            return
-        }
-
         let resolvedCoverImageData: Data?
         if let draftAlbumCoverImageData {
             resolvedCoverImageData = draftAlbumCoverImageData
@@ -1598,6 +1600,22 @@ private struct HomeContextMenuPreviewCard: View {
     }
 }
 
+private struct HomeEmptyAlbumPrompt: View {
+    let xScale: CGFloat
+
+    var body: some View {
+        Text(
+            "No videos in this album yet",
+            comment: "Empty state shown after opening an album that has no video diary cards."
+        )
+        .font(.system(size: 16 * xScale, weight: .medium))
+        .foregroundStyle(.black.opacity(0.36))
+        .multilineTextAlignment(.trailing)
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
 private struct HomeAlbumHeader: View {
     let diaries: [VideoDiary]
     let albums: [VideoAlbum]
@@ -1615,7 +1633,7 @@ private struct HomeAlbumHeader: View {
             GalleryAlbumBackdrop(height: 244 * yScale)
                 .frame(width: screenWidth, height: 244 * yScale)
 
-            GallerySectionTitle("Albums", xScale: xScale)
+            GallerySectionTitle(albums.isEmpty ? "Add your first album" : "Albums", xScale: xScale)
                 .offset(x: 19 * xScale, y: 76 * yScale)
 
             GalleryAlbumStrip(

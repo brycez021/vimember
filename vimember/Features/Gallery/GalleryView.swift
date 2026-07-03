@@ -69,7 +69,7 @@ struct GalleryView: View {
                         GalleryAlbumBackdrop(height: albumHeaderHeight)
                             .frame(width: screenWidth, height: albumHeaderHeight)
 
-                        GallerySectionTitle("Albums", xScale: xScale)
+                        GallerySectionTitle(albums.isEmpty ? "Add your first album" : "Albums", xScale: xScale)
                             .offset(x: 19 * xScale, y: 76 * yScale)
 
                         GalleryAlbumStrip(
@@ -85,7 +85,7 @@ struct GalleryView: View {
                             .frame(width: screenWidth, height: 92 * xScale)
                             .offset(y: albumStripTop)
 
-                        GallerySectionTitle("All Videos", xScale: xScale)
+                        GallerySectionTitle(diaries.isEmpty ? "Add your first video" : "All Videos", xScale: xScale)
                             .offset(x: 20 * xScale, y: 251 * yScale)
 
                         LazyVGrid(
@@ -291,10 +291,6 @@ struct GalleryView: View {
 
     @MainActor
     private func saveAlbumWithResolvedCover() async {
-        guard !selectedAlbumDiaryIDs.isEmpty else {
-            return
-        }
-
         let coverImageData: Data?
         if let draftAlbumCoverImageData {
             coverImageData = draftAlbumCoverImageData
@@ -1876,7 +1872,7 @@ struct GalleryAlbumVideoPicker: View {
                     height: topControlSize,
                     backgroundColor: Color(red: 0, green: 0.478, blue: 1),
                     foregroundColor: .white,
-                    isEnabled: !selectedDiaryIDs.isEmpty,
+                    isEnabled: true,
                     action: onSave
                 )
                 .position(x: screenWidth - topControlSide - (71 * xScale) / 2, y: topControlCenterY)
