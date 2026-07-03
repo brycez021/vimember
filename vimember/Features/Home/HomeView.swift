@@ -592,7 +592,7 @@ struct HomeView: View {
                     pendingDeleteDiary = nil
                 }
             } message: {
-                Text("This removes the local diary and copied video from vimember. It does not delete the original video in Photos.")
+                Text("This removes the local diary and copied video from Vimo. It does not delete the original video in Photos.")
             }
             .alert(deleteAlbumConfirmationTitle, isPresented: deleteAlbumConfirmationBinding) {
                 Button("Delete Album", role: .destructive) {
