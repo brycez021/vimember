@@ -120,6 +120,7 @@ struct HomeView: View {
             let gridGap: CGFloat = 3 * xScale
             let galleryCardWidth = (screenWidth - gridGap * 2) / 3
             let galleryCardHeight = galleryCardWidth * (184 / 138)
+            let albumHeaderBottom = 244 * yScale
             let selectedAlbum = albums.first { $0.id == selectedAlbumID }
             let isEditingAlbumComposer = albumComposerMode == .edit
             let albumComposerCollapsedFrame = albumComposerSourceFrame
@@ -156,7 +157,10 @@ struct HomeView: View {
                     }
                 }
             )
-            let galleryTitle = selectedAlbum?.name ?? (diaries.isEmpty ? "Add your first video" : "All Videos")
+            let isGlobalEmptyState = selectedAlbum == nil && diaries.isEmpty
+            let galleryTitle = selectedAlbum?.name ?? "All Videos"
+            let emptyStateCenterY = albumHeaderBottom
+                + (screenHeight - albumHeaderBottom - bottomControlsHeight - bottomControlsBottomMargin) * 0.52
             let galleryItemCount = visibleDiaries.count + (isAlbumFilterActive ? 1 : 0)
             let galleryRowCount = max(1, Int(ceil(Double(galleryItemCount) / 3.0)))
             let galleryContentHeight = max(
@@ -185,7 +189,6 @@ struct HomeView: View {
             )
             let scrollContentHeight = isGalleryMode ? galleryContentHeight : timelineContentHeight
             let selectedAlbumFrame = selectedAlbumID.flatMap { albumFrames[$0] }
-            let albumHeaderBottom = 244 * yScale
             let shouldShowSelectedAlbumPointer = selectedAlbumID != nil
                 && selectedAlbumFrame != nil
                 && !isAlbumHeaderHidden
@@ -207,28 +210,34 @@ struct HomeView: View {
                         .frame(width: screenWidth, height: 1)
 
                         ZStack(alignment: .topLeading) {
-                            HStack(alignment: .bottom, spacing: 12 * xScale) {
-                                CalligraphSectionTitle(galleryTitle, xScale: xScale)
-                                    .background {
-                                        GeometryReader { proxy in
-                                            Color.clear.preference(
-                                                key: HomeContentTitleFramePreferenceKey.self,
-                                                value: proxy.frame(in: .named(GalleryAddAlbumMorphCoordinateSpace.name))
-                                            )
+                            if !isGlobalEmptyState {
+                                HStack(alignment: .bottom, spacing: 12 * xScale) {
+                                    CalligraphSectionTitle(galleryTitle, xScale: xScale)
+                                        .background {
+                                            GeometryReader { proxy in
+                                                Color.clear.preference(
+                                                    key: HomeContentTitleFramePreferenceKey.self,
+                                                    value: proxy.frame(in: .named(GalleryAddAlbumMorphCoordinateSpace.name))
+                                                )
+                                            }
                                         }
+
+                                    Spacer(minLength: 12 * xScale)
+
+                                    if isAlbumFilterActive && visibleDiaries.isEmpty {
+                                        HomeEmptyAlbumPrompt(xScale: xScale)
+                                            .offset(y: -1.5 * yScale)
                                     }
-
-                                Spacer(minLength: 12 * xScale)
-
-                                if isAlbumFilterActive && visibleDiaries.isEmpty {
-                                    HomeEmptyAlbumPrompt(xScale: xScale)
-                                        .offset(y: -1.5 * yScale)
                                 }
+                                .frame(width: screenWidth - 40 * xScale, alignment: .leading)
+                                .offset(x: 20 * xScale, y: 251 * yScale)
                             }
-                            .frame(width: screenWidth - 40 * xScale, alignment: .leading)
-                            .offset(x: 20 * xScale, y: 251 * yScale)
 
-                            if isGalleryMode {
+                            if isGlobalEmptyState {
+                                HomeNoVideosEmptyState(xScale: xScale, yScale: yScale)
+                                    .frame(width: screenWidth - 40 * xScale)
+                                    .position(x: screenWidth / 2, y: emptyStateCenterY)
+                            } else if isGalleryMode {
                                 LazyVGrid(
                                     columns: [
                                         GridItem(.fixed(galleryCardWidth), spacing: gridGap),
@@ -1613,6 +1622,57 @@ private struct HomeEmptyAlbumPrompt: View {
         .multilineTextAlignment(.trailing)
         .lineLimit(1)
         .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+private struct HomeNoVideosEmptyState: View {
+    let xScale: CGFloat
+    let yScale: CGFloat
+
+    var body: some View {
+        VStack(spacing: 20 * xScale) {
+            HomeNoVideosEmptyStateLogo(size: 58 * xScale)
+                .offset(y: -4 * yScale)
+
+            VStack(spacing: 5 * xScale) {
+                Text(
+                    "No videos",
+                    comment: "Empty state title shown when the user has not added any video diaries."
+                )
+                .font(.system(size: 24 * xScale, weight: .semibold))
+                .tracking(24 * xScale * 0.01)
+                .foregroundStyle(.black)
+                .multilineTextAlignment(.center)
+                .lineLimit(1)
+                .offset(y: -6 * yScale)
+
+                Text(
+                    "Tap the button to add a video",
+                    comment: "Empty state instruction shown when the user has not added any video diaries."
+                )
+                .font(.system(size: 14 * xScale, weight: .regular))
+                .foregroundStyle(.black.opacity(0.42))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .offset(y: -5 * yScale)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct HomeNoVideosEmptyStateLogo: View {
+    let size: CGFloat
+
+    var body: some View {
+        Image("NoVideosEmptyStateLogo")
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
     }
 }
 
