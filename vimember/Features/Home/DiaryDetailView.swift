@@ -224,7 +224,7 @@ struct DiaryDetailView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the local diary and copied video from Vimo. It does not delete the original video in Photos.")
+            Text("This removes the local diary and copied video from Vimory. It does not delete the original video in Photos.")
         }
         .fullScreenCover(isPresented: $isEditing) {
             EditVideoDiaryFlowView(diary: currentDiary) { title, body in

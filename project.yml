@@ -26,15 +26,15 @@ targets:
     info:
       path: vimember/Info.plist
       properties:
-        CFBundleDisplayName: Vimo
-        CFBundleName: Vimo
+        CFBundleDisplayName: Vimory
+        CFBundleName: Vimory
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
         UIRequiresFullScreen: true
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
-        NSPhotoLibraryUsageDescription: "Vimo needs access to videos you choose from your photo library."
+        NSPhotoLibraryUsageDescription: "Vimory needs access to videos you choose from your photo library."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.brycez021.vimember
