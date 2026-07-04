@@ -430,6 +430,12 @@ struct HomeView: View {
                     addButtonSize: bottomAddButtonSize,
                     gap: bottomControlsGap,
                     isSearchVisible: false,
+                    addButtonBackgroundColor: isGlobalEmptyState
+                        ? Color(red: 0.02, green: 0.55, blue: 0.96)
+                        : nil,
+                    addButtonForegroundColor: isGlobalEmptyState
+                        ? .white
+                        : .primary,
                     addAction: {
                         os_signpost(.event, log: homePerformanceLog, name: "Home Open Import")
                         isImportPresented = true
@@ -1641,7 +1647,7 @@ private struct HomeEmptyAlbumPrompt: View {
 
     var body: some View {
         Text(
-            "Long-press the cover to add videos",
+            "Long-press the cover to select videos",
             comment: "Instruction shown after opening an album that has no video diary cards."
         )
         .font(.system(size: 16 * xScale, weight: .medium))
@@ -2291,6 +2297,8 @@ private struct HomeBottomControls: View {
     let addButtonSize: CGFloat
     let gap: CGFloat
     let isSearchVisible: Bool
+    var addButtonBackgroundColor: Color?
+    var addButtonForegroundColor: Color = .primary
     let addAction: () -> Void
 
     private var width: CGFloat {
@@ -2324,14 +2332,49 @@ private struct HomeBottomControls: View {
                 .frame(width: searchWidth, height: height)
             }
 
-            LiquidGlassAddButton(size: addButtonSize, action: addAction)
+            ZStack {
+                LiquidGlassContainer(spacing: 0) {
+                    LiquidGlassAddButtonSurface(
+                        size: addButtonSize,
+                        tint: addButtonBackgroundColor
+                    )
+                }
+                .allowsHitTesting(false)
+
+                LiquidGlassAddButton(
+                    size: addButtonSize,
+                    foregroundColor: addButtonForegroundColor,
+                    action: addAction
+                )
+            }
+            .frame(width: addButtonSize, height: addButtonSize)
         }
         .frame(width: width, height: max(height, addButtonSize))
     }
 }
 
+private struct LiquidGlassAddButtonSurface: View {
+    let size: CGFloat
+    var tint: Color?
+
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            Circle()
+                .fill(.clear)
+                .frame(width: size, height: size)
+                .glassEffect(.regular.tint(tint).interactive(), in: Circle())
+        } else {
+            Circle()
+                .fill(tint ?? .clear)
+                .frame(width: size, height: size)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+    }
+}
+
 private struct LiquidGlassAddButton: View {
     let size: CGFloat
+    var foregroundColor: Color = .primary
     let action: () -> Void
 
     var body: some View {
@@ -2339,10 +2382,9 @@ private struct LiquidGlassAddButton: View {
             Image(systemName: "plus")
                 .font(.system(size: max(20, size * 0.44), weight: .semibold))
                 .symbolRenderingMode(.monochrome)
-                .foregroundStyle(.primary)
+                .foregroundStyle(foregroundColor)
                 .frame(width: size, height: size)
                 .contentShape(Circle())
-                .vimemberInteractiveGlass(in: Circle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Add video diary")
