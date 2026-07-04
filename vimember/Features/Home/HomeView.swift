@@ -452,7 +452,7 @@ struct HomeView: View {
                     Color.black.opacity(0.001)
                         .ignoresSafeArea()
                         .onTapGesture {
-                            closeAddAlbumFlow()
+                            saveAlbum()
                         }
                         .zIndex(2.8)
                 }
@@ -475,13 +475,13 @@ struct HomeView: View {
                     xScale: xScale,
                     yScale: yScale,
                     onClose: {
-                        closeAddAlbumFlow()
+                        saveAlbum()
                     },
                     onPickCover: {
                         showAlbumCoverPicker()
                     },
                     onNext: {
-                        showAlbumVideoPicker()
+                        saveAlbumThenShowVideoPicker()
                     },
                     onDelete: {
                         if let editingAlbumID {
@@ -1223,12 +1223,27 @@ struct HomeView: View {
     @MainActor
     private func saveAlbum() {
         Task {
-            await saveAlbumWithResolvedCover()
+            await saveAlbumWithResolvedCover(shouldClose: true)
         }
     }
 
     @MainActor
-    private func saveAlbumWithResolvedCover() async {
+    private func saveAlbumThenShowVideoPicker() {
+        Task {
+            await saveAlbumWithResolvedCover(shouldClose: false)
+            showAlbumVideoPicker()
+        }
+    }
+
+    @MainActor
+    private func saveAlbumWithResolvedCover(shouldClose: Bool) async {
+        if isEmptyNewAlbumDraft {
+            if shouldClose {
+                closeAddAlbumFlow()
+            }
+            return
+        }
+
         let resolvedCoverImageData: Data?
         if let draftAlbumCoverImageData {
             resolvedCoverImageData = draftAlbumCoverImageData
@@ -1255,11 +1270,23 @@ struct HomeView: View {
                 diaryIDs: selectedAlbumDiaryIDs,
                 coverImageData: resolvedCoverImageData
             )
+            editingAlbumID = newAlbumID
+            albumComposerMode = .edit
             selectedAlbumID = newAlbumID
         }
 
         try? modelContext.save()
-        closeAddAlbumFlow()
+        if shouldClose {
+            closeAddAlbumFlow()
+        }
+    }
+
+    private var isEmptyNewAlbumDraft: Bool {
+        albumComposerMode == .add
+            && editingAlbumID == nil
+            && draftAlbumName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && draftAlbumCoverImageData == nil
+            && selectedAlbumDiaryIDs.isEmpty
     }
 
     @MainActor
@@ -1614,8 +1641,8 @@ private struct HomeEmptyAlbumPrompt: View {
 
     var body: some View {
         Text(
-            "No videos in this album yet",
-            comment: "Empty state shown after opening an album that has no video diary cards."
+            "Long-press the cover to add videos",
+            comment: "Instruction shown after opening an album that has no video diary cards."
         )
         .font(.system(size: 16 * xScale, weight: .medium))
         .foregroundStyle(.black.opacity(0.36))
@@ -1693,7 +1720,7 @@ private struct HomeAlbumHeader: View {
             GalleryAlbumBackdrop(height: 244 * yScale)
                 .frame(width: screenWidth, height: 244 * yScale)
 
-            GallerySectionTitle(albums.isEmpty ? "Add your first album" : "Albums", xScale: xScale)
+            GallerySectionTitle("Albums", xScale: xScale)
                 .offset(x: 19 * xScale, y: 76 * yScale)
 
             GalleryAlbumStrip(

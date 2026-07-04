@@ -322,11 +322,12 @@ private struct VideoSelectionPage: View {
                             columns: Array(repeating: GridItem(.fixed(gridItemSize), spacing: 2), count: 3),
                             spacing: 2
                         ) {
-                            ForEach(viewModel.items) { item in
+                            ForEach(Array(viewModel.items.enumerated()), id: \.element.id) { index, item in
                                 VideoSelectionTile(
                                     item: item,
                                     isSelected: selectedItem?.id == item.id,
-                                    size: gridItemSize
+                                    size: gridItemSize,
+                                    column: index % 3
                                 )
                                 .contentShape(Rectangle())
                                 .onTapGesture {
@@ -423,6 +424,7 @@ private struct VideoSelectionTile: View {
     let item: PhotoLibraryVideoItem
     let isSelected: Bool
     let size: CGFloat
+    let column: Int
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -452,7 +454,24 @@ private struct VideoSelectionTile: View {
             }
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+        .clipShape(VideoSelectionTileShape(column: column, radius: 3))
+    }
+}
+
+private struct VideoSelectionTileShape: Shape {
+    let column: Int
+    let radius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let radii = RectangleCornerRadii(
+            topLeading: column == 0 ? 0 : radius,
+            bottomLeading: column == 0 ? 0 : radius,
+            bottomTrailing: column == 2 ? 0 : radius,
+            topTrailing: column == 2 ? 0 : radius
+        )
+
+        return UnevenRoundedRectangle(cornerRadii: radii, style: .continuous)
+            .path(in: rect)
     }
 }
 

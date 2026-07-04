@@ -69,7 +69,7 @@ struct GalleryView: View {
                         GalleryAlbumBackdrop(height: albumHeaderHeight)
                             .frame(width: screenWidth, height: albumHeaderHeight)
 
-                        GallerySectionTitle(albums.isEmpty ? "Add your first album" : "Albums", xScale: xScale)
+                        GallerySectionTitle("Albums", xScale: xScale)
                             .offset(x: 19 * xScale, y: 76 * yScale)
 
                         GalleryAlbumStrip(
@@ -1127,8 +1127,8 @@ struct GalleryAddAlbumComposerContent: View {
         let cardWidth = 380 * xScale
         let cardHeight = 426 * yScale
         let closeSize = 40 * xScale
-        let saveWidth = 71 * xScale
-        let saveHeight = 40 * xScale
+        let selectWidth = 80 * xScale
+        let selectHeight = 40 * xScale
         let coverSize = 200 * xScale
         let coverCornerRadius = 30 * xScale
         let coverShape = RoundedRectangle(cornerRadius: coverCornerRadius, style: .continuous)
@@ -1164,9 +1164,9 @@ struct GalleryAddAlbumComposerContent: View {
                 .position(x: cardWidth / 2, y: 41 * yScale)
 
             GalleryGlassPillActionButton(
-                title: "Save",
-                width: saveWidth,
-                height: saveHeight,
+                title: "Select",
+                width: selectWidth,
+                height: selectHeight,
                 backgroundColor: Color(red: 0, green: 0.478, blue: 1),
                 foregroundColor: .white,
                 isEnabled: true,
@@ -1175,7 +1175,7 @@ struct GalleryAddAlbumComposerContent: View {
                     onNext()
                 }
             )
-            .position(x: 329.5 * xScale, y: 43 * yScale)
+            .position(x: (365 * xScale) - selectWidth / 2, y: 41 * yScale)
 
             Button(action: onPickCover) {
                 ZStack {
@@ -1493,28 +1493,38 @@ private struct AlbumCoverSelectionPage: View {
             let buttonTop = 52 * yScale + 16 * yScale
             let buttonCenterY = buttonTop + buttonSize / 2
             let gridItemSize = (screenWidth - 4) / 3
+            let gridTopInset = gridItemSize + 2
 
             ZStack(alignment: .topLeading) {
                 Color.white.ignoresSafeArea()
 
                 ScrollView(.vertical, showsIndicators: false) {
-                    LazyVGrid(
-                        columns: Array(repeating: GridItem(.fixed(gridItemSize), spacing: 2), count: 3),
-                        spacing: 2
-                    ) {
-                        ForEach(viewModel.items) { item in
-                            AlbumCoverSelectionTile(
-                                item: item,
-                                isSelected: selectedItem?.id == item.id,
-                                size: gridItemSize
-                            )
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                selectedItem = item
+                    VStack(spacing: 0) {
+                        AlbumCoverSelectionHeader(
+                            width: screenWidth,
+                            height: gridTopInset,
+                            titleCenterY: buttonCenterY,
+                            xScale: xScale
+                        )
+
+                        LazyVGrid(
+                            columns: Array(repeating: GridItem(.fixed(gridItemSize), spacing: 2), count: 3),
+                            spacing: 2
+                        ) {
+                            ForEach(Array(viewModel.items.enumerated()), id: \.element.id) { index, item in
+                                AlbumCoverSelectionTile(
+                                    item: item,
+                                    isSelected: selectedItem?.id == item.id,
+                                    size: gridItemSize,
+                                    column: index % 3
+                                )
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    selectedItem = item
+                                }
                             }
                         }
                     }
-                    .padding(.top, 0)
                     .frame(width: screenWidth, alignment: .top)
                 }
 
@@ -1580,10 +1590,30 @@ private struct AlbumCoverSelectionPage: View {
     }
 }
 
+private struct AlbumCoverSelectionHeader: View {
+    let width: CGFloat
+    let height: CGFloat
+    let titleCenterY: CGFloat
+    let xScale: CGFloat
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Text("Select Cover")
+                .font(.system(size: 24 * xScale, weight: .semibold))
+                .tracking(24 * xScale * 0.01)
+                .foregroundStyle(.black)
+                .fixedSize()
+                .position(x: width / 2, y: titleCenterY)
+        }
+        .frame(width: width, height: height, alignment: .topLeading)
+    }
+}
+
 private struct AlbumCoverSelectionTile: View {
     let item: PhotoLibraryCoverItem
     let isSelected: Bool
     let size: CGFloat
+    let column: Int
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -1617,7 +1647,24 @@ private struct AlbumCoverSelectionTile: View {
             }
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+        .clipShape(AlbumCoverSelectionTileShape(column: column, radius: 3))
+    }
+}
+
+private struct AlbumCoverSelectionTileShape: Shape {
+    let column: Int
+    let radius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let radii = RectangleCornerRadii(
+            topLeading: column == 0 ? 0 : radius,
+            bottomLeading: column == 0 ? 0 : radius,
+            bottomTrailing: column == 2 ? 0 : radius,
+            topTrailing: column == 2 ? 0 : radius
+        )
+
+        return UnevenRoundedRectangle(cornerRadii: radii, style: .continuous)
+            .path(in: rect)
     }
 }
 
