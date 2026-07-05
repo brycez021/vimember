@@ -38,3 +38,4 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.brycez021.vimember
+        TARGETED_DEVICE_FAMILY: "1"
