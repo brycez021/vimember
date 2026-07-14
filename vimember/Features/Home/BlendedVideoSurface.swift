@@ -136,8 +136,25 @@ struct BlendedVideoSurface<Content: View>: View {
         videoHeight - blendTopOffset + colorBlockOverflow
     }
 
-    private var clearVideoFadeStart: CGFloat {
-        usesCompactEdgeBlend ? 0.78 : 1
+    private var landscapeColorBlendStops: [Gradient.Stop] {
+        [
+            .init(color: .clear, location: 0),
+            .init(color: bottomColor.opacity(0.06), location: 0.12),
+            .init(color: bottomColor.opacity(0.20), location: 0.30),
+            .init(color: bottomColor.opacity(0.44), location: 0.46),
+            .init(color: bottomColor.opacity(0.68), location: 0.56),
+            .init(color: bottomColor.opacity(0.88), location: 0.75),
+            .init(color: bottomColor, location: 1)
+        ]
+    }
+
+    private var portraitColorBlendStops: [Gradient.Stop] {
+        [
+            .init(color: .clear, location: 0),
+            .init(color: bottomColor.opacity(0.16), location: 0.18),
+            .init(color: bottomColor.opacity(0.62), location: 0.64),
+            .init(color: bottomColor.opacity(0.96), location: 1)
+        ]
     }
 
     private var clampedEdgeBlendProgress: CGFloat {
@@ -233,12 +250,7 @@ struct BlendedVideoSurface<Content: View>: View {
     private var pureColorBlendLayer: some View {
         ZStack {
             LinearGradient(
-                stops: [
-                    .init(color: .clear, location: 0),
-                    .init(color: bottomColor.opacity(usesCompactEdgeBlend ? 0.05 : 0.16), location: usesCompactEdgeBlend ? 0.22 : 0.18),
-                    .init(color: bottomColor.opacity(usesCompactEdgeBlend ? 0.20 : 0.62), location: usesCompactEdgeBlend ? 0.54 : 0.64),
-                    .init(color: bottomColor.opacity(usesCompactEdgeBlend ? 0.60 : 0.96), location: 1)
-                ],
+                stops: isLandscape ? landscapeColorBlendStops : portraitColorBlendStops,
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -253,6 +265,7 @@ struct BlendedVideoSurface<Content: View>: View {
                 endPoint: .bottom
             )
             .blendMode(.plusLighter)
+            .opacity(isLandscape ? 0 : 1)
         }
     }
 
@@ -279,9 +292,12 @@ struct BlendedVideoSurface<Content: View>: View {
             LinearGradient(
                 stops: [
                     .init(color: .black, location: 0),
-                    .init(color: .black, location: clearVideoFadeStart),
-                    .init(color: .black.opacity(0.50), location: 0.90),
-                    .init(color: .black.opacity(0.12), location: 0.98),
+                    .init(color: .black, location: 0.58),
+                    .init(color: .black.opacity(0.94), location: 0.68),
+                    .init(color: .black.opacity(0.78), location: 0.78),
+                    .init(color: .black.opacity(0.55), location: 0.86),
+                    .init(color: .black.opacity(0.30), location: 0.93),
+                    .init(color: .black.opacity(0.08), location: 0.98),
                     .init(color: .clear, location: 1)
                 ],
                 startPoint: .top,
