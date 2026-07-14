@@ -45,6 +45,7 @@ struct HomeView: View {
     @State private var selectedAlbumID: VideoAlbum.ID?
     @State private var editingAlbumID: VideoAlbum.ID?
     @State private var pendingDeleteAlbumID: VideoAlbum.ID?
+    @State private var albumIDPendingRemovalAfterCollapse: VideoAlbum.ID?
     @State private var albumComposerMode: AlbumComposerMode = .add
     @State private var albumComposerSourceFrame: CGRect?
     @State private var albumComposerSourceCoverImageData: Data?
@@ -77,6 +78,8 @@ struct HomeView: View {
     private static let homeScrollTopThreshold: CGFloat = -6
     private static let albumComposerContentRevealDelayNanoseconds: UInt64 = 220_000_000
     private static let albumComposerResetDelayNanoseconds: UInt64 = 360_000_000
+    private static let albumDeletionReflowDelayNanoseconds: UInt64 = 50_000_000
+    private static let albumDeletionAnimationDuration: Double = 0.24
 
     var body: some View {
         GeometryReader { geometry in
@@ -367,7 +370,8 @@ struct HomeView: View {
                     diaries: diaries,
                     albums: albums,
                     selectedAlbumID: selectedAlbumID,
-                    hiddenAlbumID: isEditingAlbumComposer ? editingAlbumID : nil,
+                    hiddenAlbumID: albumIDPendingRemovalAfterCollapse
+                        ?? (isEditingAlbumComposer ? editingAlbumID : nil),
                     screenWidth: screenWidth,
                     xScale: xScale,
                     yScale: yScale,
@@ -381,6 +385,7 @@ struct HomeView: View {
                         showEditAlbumComposer(for: albumID)
                     }
                 )
+                .allowsHitTesting(albumIDPendingRemovalAfterCollapse == nil)
                 .frame(width: screenWidth, height: 244 * yScale, alignment: .topLeading)
                 .offset(y: isAlbumHeaderHidden ? -244 * yScale : 0)
                 .zIndex(2)
@@ -705,28 +710,9 @@ struct HomeView: View {
         }
 
         pendingDeleteAlbumID = nil
-        if let albumRecord = albumRecords.first(where: { $0.id == albumID }) {
-            modelContext.delete(albumRecord)
-            try? modelContext.save()
-        }
-
-        albumComposerTransitionID += 1
-        let transitionID = albumComposerTransitionID
-
-        withAnimation(.easeOut(duration: 0.12)) {
-            isAddAlbumComposerContentVisible = false
-        }
-        withAnimation(.snappy(duration: 0.32)) {
-            isAddAlbumComposerPresented = false
-            albumComposerProgress = 0
-            isAlbumVideoPickerPresented = false
-            isAlbumCoverPickerPresented = false
-            if selectedAlbumID == albumID {
-                selectedAlbumID = nil
-            }
-        }
-
-        resetAlbumComposerDraftAfterCollapse(transitionID: transitionID)
+        albumIDPendingRemovalAfterCollapse = albumID
+        let transitionID = collapseAlbumComposer()
+        deleteAlbumAfterComposerCollapse(albumID, transitionID: transitionID)
     }
 
     @MainActor
@@ -1137,6 +1123,16 @@ struct HomeView: View {
     @MainActor
     private func closeAddAlbumFlow() {
         let shouldDelayReset = isAddAlbumComposerPresented || isAlbumVideoPickerPresented || isAlbumCoverPickerPresented
+        let transitionID = collapseAlbumComposer()
+        if shouldDelayReset {
+            resetAlbumComposerDraftAfterCollapse(transitionID: transitionID)
+        } else {
+            resetAlbumComposerDraft()
+        }
+    }
+
+    @MainActor
+    private func collapseAlbumComposer() -> Int {
         albumComposerTransitionID += 1
         let transitionID = albumComposerTransitionID
         withAnimation(.easeOut(duration: 0.12)) {
@@ -1148,10 +1144,44 @@ struct HomeView: View {
             isAlbumVideoPickerPresented = false
             isAlbumCoverPickerPresented = false
         }
-        if shouldDelayReset {
-            resetAlbumComposerDraftAfterCollapse(transitionID: transitionID)
-        } else {
+        return transitionID
+    }
+
+    @MainActor
+    private func deleteAlbumAfterComposerCollapse(_ albumID: VideoAlbum.ID, transitionID: Int) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.albumComposerResetDelayNanoseconds)
+            guard albumIDPendingRemovalAfterCollapse == albumID else { return }
+            guard albumComposerTransitionID == transitionID else {
+                albumIDPendingRemovalAfterCollapse = nil
+                return
+            }
+            guard !isAddAlbumComposerPresented && !isAlbumVideoPickerPresented && !isAlbumCoverPickerPresented else {
+                albumIDPendingRemovalAfterCollapse = nil
+                return
+            }
+
             resetAlbumComposerDraft()
+
+            try? await Task.sleep(nanoseconds: Self.albumDeletionReflowDelayNanoseconds)
+            guard albumIDPendingRemovalAfterCollapse == albumID else { return }
+
+            withAnimation(.snappy(duration: Self.albumDeletionAnimationDuration)) {
+                if selectedAlbumID == albumID {
+                    selectedAlbumID = nil
+                }
+                if let albumRecord = albumRecords.first(where: { $0.id == albumID }) {
+                    modelContext.delete(albumRecord)
+                }
+            }
+            try? modelContext.save()
+
+            try? await Task.sleep(
+                nanoseconds: UInt64(Self.albumDeletionAnimationDuration * 1_000_000_000)
+            )
+            if albumIDPendingRemovalAfterCollapse == albumID {
+                albumIDPendingRemovalAfterCollapse = nil
+            }
         }
     }
 

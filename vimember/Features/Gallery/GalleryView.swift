@@ -640,6 +640,7 @@ struct GalleryAlbumStrip: View {
             }
             .padding(.leading, 20 * xScale)
             .padding(.trailing, 20 * xScale)
+            .animation(.snappy(duration: 0.24), value: albumItems.map(\.id))
         }
         .scrollClipDisabled()
     }
