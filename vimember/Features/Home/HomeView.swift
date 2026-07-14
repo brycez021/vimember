@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import UIKit
+import CoreText
 import os
 
 private let homePerformanceLog = OSLog(
@@ -2063,6 +2064,22 @@ private struct HomeDiaryTextOverlay: View {
     }
 
     var body: some View {
+        let bodyLayout = HomeBodyTextLayout.analyze(
+            text: diary.body,
+            fontName: "PingFangSC-Regular",
+            fontSize: scaled(16),
+            letterSpacing: scaled(0.16),
+            width: scaled(layout.bodyWidth)
+        )
+        let baseGroupOffset = scaled(3)
+        let singleLineGroupOffset = bodyLayout.isSingleLine ? scaled(20) : 0
+        let headerCompensation = bodyLayout.firstLineHasMoreThanEightHanCharacters
+            ? -baseGroupOffset
+            : 0
+        let groupOffset = bodyLayout.isEmpty
+            ? scaled(layout.dividerTopFromBottom - 23)
+            : scaled(layout.groupYOffset) + baseGroupOffset + singleLineGroupOffset
+
         ZStack(alignment: .topLeading) {
             HomeSingleLineTextLabel(
                 text: diary.title,
@@ -2074,7 +2091,9 @@ private struct HomeDiaryTextOverlay: View {
             )
             .offset(
                 x: scaled(layout.titleX),
-                y: cardHeight - scaled(layout.titleTopFromBottom)
+                y: cardHeight
+                    - scaled(layout.titleTopFromBottom)
+                    + headerCompensation
             )
 
             HomeSingleLineTextLabel(
@@ -2087,7 +2106,9 @@ private struct HomeDiaryTextOverlay: View {
             )
             .offset(
                 x: scaled(layout.dateX),
-                y: cardHeight - scaled(layout.dateTopFromBottom)
+                y: cardHeight
+                    - scaled(layout.dateTopFromBottom)
+                    + headerCompensation
             )
 
             Rectangle()
@@ -2095,7 +2116,9 @@ private struct HomeDiaryTextOverlay: View {
                 .frame(width: scaled(374), height: scaled(0.5))
                 .offset(
                     x: scaled(layout.dividerX),
-                    y: cardHeight - scaled(layout.dividerTopFromBottom)
+                    y: cardHeight
+                        - scaled(layout.dividerTopFromBottom)
+                        + headerCompensation
                 )
 
             HomeBodyTextLabel(
@@ -2113,7 +2136,7 @@ private struct HomeDiaryTextOverlay: View {
             )
         }
         .frame(width: width, height: cardHeight, alignment: .topLeading)
-        .offset(y: scaled(layout.groupYOffset))
+        .offset(y: groupOffset)
     }
 }
 
@@ -2163,6 +2186,90 @@ private struct HomeBodyTextLabel: UIViewRepresentable {
                 .paragraphStyle: paragraph
             ]
         )
+    }
+}
+
+private enum HomeBodyTextLayout {
+    struct Metrics {
+        let isEmpty: Bool
+        let isSingleLine: Bool
+        let firstLineHasMoreThanEightHanCharacters: Bool
+    }
+
+    static func analyze(
+        text: String,
+        fontName: String,
+        fontSize: CGFloat,
+        letterSpacing: CGFloat,
+        width: CGFloat
+    ) -> Metrics {
+        let isEmpty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard !isEmpty else {
+            return Metrics(
+                isEmpty: true,
+                isSingleLine: false,
+                firstLineHasMoreThanEightHanCharacters: false
+            )
+        }
+
+        let font = UIFont(name: fontName, size: fontSize)
+            ?? .systemFont(ofSize: fontSize, weight: .regular)
+        let attributedText = NSAttributedString(
+            string: text,
+            attributes: [
+                .font: font,
+                .kern: letterSpacing
+            ]
+        )
+
+        guard attributedText.length > 0, width > 0 else {
+            return Metrics(
+                isEmpty: false,
+                isSingleLine: false,
+                firstLineHasMoreThanEightHanCharacters: false
+            )
+        }
+
+        let typesetter = CTTypesetterCreateWithAttributedString(attributedText as CFAttributedString)
+        let suggestedLength = CTTypesetterSuggestLineBreak(typesetter, 0, Double(width))
+        guard suggestedLength > 0 else {
+            return Metrics(
+                isEmpty: false,
+                isSingleLine: false,
+                firstLineHasMoreThanEightHanCharacters: false
+            )
+        }
+
+        let firstLineRange = NSRange(
+            location: 0,
+            length: min(suggestedLength, attributedText.length)
+        )
+        let firstLine = (text as NSString).substring(with: firstLineRange)
+        var hanCharacterCount = 0
+
+        for scalar in firstLine.unicodeScalars {
+            if isHan(scalar.value) {
+                hanCharacterCount += 1
+            }
+        }
+
+        return Metrics(
+            isEmpty: false,
+            isSingleLine: suggestedLength >= attributedText.length,
+            firstLineHasMoreThanEightHanCharacters: hanCharacterCount > 8
+        )
+    }
+
+    private static func isHan(_ scalarValue: UInt32) -> Bool {
+        switch scalarValue {
+        case 0x3400...0x4DBF,
+             0x4E00...0x9FFF,
+             0xF900...0xFAFF,
+             0x20000...0x2FA1F:
+            return true
+        default:
+            return false
+        }
     }
 }
 

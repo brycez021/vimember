@@ -512,7 +512,7 @@ private struct AddVideoEditorModernView: View {
     @State private var scrollPosition = ScrollPosition()
     @State private var gestureStartOffsetY: CGFloat = 0
     @State private var gestureStartRegion = AddVideoFlowScrollRegion.video
-    @State private var didFocusBodyOnAppear = false
+    @State private var didFocusTitleOnAppear = false
     @State private var focusedInputLineY: CGFloat?
     @FocusState private var focusedField: AddVideoEditorField?
 
@@ -555,7 +555,7 @@ private struct AddVideoEditorModernView: View {
                                 },
                                 onDown: {
                                     snapToAddVideoFlowPage(screenHeight, pageHeight: screenHeight)
-                                    focusBodyAfterPageSnap()
+                                    focusTitleAfterPageSnap()
                                 }
                             )
                             .frame(width: screenWidth, height: screenHeight)
@@ -610,14 +610,14 @@ private struct AddVideoEditorModernView: View {
                             currentOffsetY: context.geometry.contentOffset.y,
                             pageHeight: screenHeight
                            ) {
-                            let shouldFocusBodyAfterSnap = gestureStartRegion == .video && targetY > screenHeight / 2
+                            let shouldFocusTitleAfterSnap = gestureStartRegion == .video && targetY > screenHeight / 2
                             if gestureStartRegion == .textTop && targetY <= screenHeight / 2 {
                                 focusedField = nil
                             }
                             DispatchQueue.main.async {
                                 snapToAddVideoFlowPage(targetY, pageHeight: screenHeight)
-                                if shouldFocusBodyAfterSnap {
-                                    focusBodyAfterPageSnap()
+                                if shouldFocusTitleAfterSnap {
+                                    focusTitleAfterPageSnap()
                                 }
                             }
                         }
@@ -652,10 +652,10 @@ private struct AddVideoEditorModernView: View {
                             gestureStartOffsetY = screenHeight
                             gestureStartRegion = .textTop
 
-                            guard !didFocusBodyOnAppear else { return }
-                            didFocusBodyOnAppear = true
+                            guard !didFocusTitleOnAppear else { return }
+                            didFocusTitleOnAppear = true
                             DispatchQueue.main.async {
-                                focusedField = .body
+                                focusedField = .title
                             }
                         }
                     }
@@ -731,10 +731,10 @@ private struct AddVideoEditorModernView: View {
         gestureStartRegion = addVideoFlowScrollRegion(for: pageY, pageHeight: pageHeight)
     }
 
-    private func focusBodyAfterPageSnap() {
+    private func focusTitleAfterPageSnap() {
         DispatchQueue.main.asyncAfter(deadline: .now() + addVideoFlowPageSnapDuration) {
             guard gestureStartRegion == .textTop else { return }
-            focusedField = .body
+            focusedField = .title
         }
     }
 
@@ -1058,7 +1058,7 @@ private struct AddVideoEditorCompatView: View {
     @State private var scrollRequestID = 0
     @State private var gestureStartOffsetY: CGFloat = 0
     @State private var gestureStartRegion = AddVideoFlowScrollRegion.video
-    @State private var didFocusBodyOnAppear = false
+    @State private var didFocusTitleOnAppear = false
     @State private var focusedInputLineY: CGFloat?
     @FocusState private var focusedField: AddVideoEditorField?
 
@@ -1107,7 +1107,7 @@ private struct AddVideoEditorCompatView: View {
                             },
                             onDown: {
                                 snapToAddVideoFlowPage(screenHeight, pageHeight: screenHeight)
-                                focusBodyAfterPageSnap()
+                                focusTitleAfterPageSnap()
                             }
                         )
                         .frame(width: screenWidth, height: screenHeight)
@@ -1207,10 +1207,10 @@ private struct AddVideoEditorCompatView: View {
                     gestureStartOffsetY = screenHeight
                     gestureStartRegion = .textTop
 
-                    guard !didFocusBodyOnAppear else { return }
-                    didFocusBodyOnAppear = true
+                    guard !didFocusTitleOnAppear else { return }
+                    didFocusTitleOnAppear = true
                     DispatchQueue.main.async {
-                        focusedField = .body
+                        focusedField = .title
                     }
                 }
             }
@@ -1244,10 +1244,10 @@ private struct AddVideoEditorCompatView: View {
         gestureStartRegion = addVideoFlowScrollRegion(for: pageY, pageHeight: pageHeight)
     }
 
-    private func focusBodyAfterPageSnap() {
+    private func focusTitleAfterPageSnap() {
         DispatchQueue.main.asyncAfter(deadline: .now() + addVideoFlowPageSnapDuration) {
             guard gestureStartRegion == .textTop else { return }
-            focusedField = .body
+            focusedField = .title
         }
     }
 
@@ -1261,13 +1261,13 @@ private struct AddVideoEditorCompatView: View {
             return
         }
 
-        let shouldFocusBodyAfterSnap = gestureStartRegion == .video && targetY > pageHeight / 2
+        let shouldFocusTitleAfterSnap = gestureStartRegion == .video && targetY > pageHeight / 2
         if gestureStartRegion == .textTop && targetY <= pageHeight / 2 {
             focusedField = nil
         }
         snapToAddVideoFlowPage(targetY, pageHeight: pageHeight)
-        if shouldFocusBodyAfterSnap {
-            focusBodyAfterPageSnap()
+        if shouldFocusTitleAfterSnap {
+            focusTitleAfterPageSnap()
         }
     }
 
