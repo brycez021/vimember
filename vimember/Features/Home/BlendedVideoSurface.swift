@@ -26,6 +26,7 @@ struct BlendedVideoSurface<Content: View>: View {
     let edgeBlendProgress: CGFloat
     let topEdgeBlendProgress: CGFloat
     let videoGravity: AVLayerVideoGravity
+    let isFullscreenAspectFit: Bool
     let layout: BlendedVideoSurfaceLayout
     let colorSamplingPolicy: BlendedVideoColorSamplingPolicy
     let seekRequest: VideoPlaybackSeekRequest?
@@ -49,6 +50,7 @@ struct BlendedVideoSurface<Content: View>: View {
         edgeBlendProgress: CGFloat = 0,
         topEdgeBlendProgress: CGFloat = 0,
         videoGravity: AVLayerVideoGravity = .resizeAspectFill,
+        isFullscreenAspectFit: Bool = false,
         layout: BlendedVideoSurfaceLayout = .topAnchored,
         colorSamplingPolicy: BlendedVideoColorSamplingPolicy = .sampleVideoFrame,
         seekRequest: VideoPlaybackSeekRequest? = nil,
@@ -69,6 +71,7 @@ struct BlendedVideoSurface<Content: View>: View {
         self.edgeBlendProgress = edgeBlendProgress
         self.topEdgeBlendProgress = topEdgeBlendProgress
         self.videoGravity = videoGravity
+        self.isFullscreenAspectFit = isFullscreenAspectFit
         self.layout = layout
         self.colorSamplingPolicy = colorSamplingPolicy
         self.seekRequest = seekRequest
@@ -171,7 +174,7 @@ struct BlendedVideoSurface<Content: View>: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            bottomColor
+            isFullscreenAspectFit ? Color.black : bottomColor
 
             VideoPlayerSurface(
                 url: url,
@@ -181,14 +184,14 @@ struct BlendedVideoSurface<Content: View>: View {
                 seekRequest: seekRequest,
                 onProgressChange: onPlaybackProgressChange
             )
-                .frame(width: width, height: videoHeight)
-                .blur(radius: videoBlurRadius, opaque: true)
+                .frame(width: width, height: isFullscreenAspectFit ? renderHeight : videoHeight)
+                .blur(radius: isFullscreenAspectFit ? 0 : videoBlurRadius, opaque: true)
                 .mask(clearVideoMask)
                 .clipped()
-                .offset(y: visualVideoYOffset)
+                .offset(y: isFullscreenAspectFit ? 0 : visualVideoYOffset)
                 .zIndex(0)
 
-            if !usesCenteredEdges {
+            if !isFullscreenAspectFit && !usesCenteredEdges {
                 pureColorBlendLayer
                     .frame(height: blendMaskHeight)
                     .offset(y: visualVideoYOffset + blendTopOffset)
@@ -274,20 +277,22 @@ struct BlendedVideoSurface<Content: View>: View {
         if usesCenteredEdges {
             LinearGradient(
                 stops: [
-                    .init(color: .clear, location: 0),
-                    .init(color: .black.opacity(0.08), location: 0.04),
-                    .init(color: .black.opacity(0.32), location: 0.10),
-                    .init(color: .black.opacity(0.70), location: 0.18),
+                    .init(color: .black.opacity(centeredEdgeOpacity(0)), location: 0),
+                    .init(color: .black.opacity(centeredEdgeOpacity(0.08)), location: 0.04),
+                    .init(color: .black.opacity(centeredEdgeOpacity(0.32)), location: 0.10),
+                    .init(color: .black.opacity(centeredEdgeOpacity(0.70)), location: 0.18),
                     .init(color: .black, location: 0.30),
                     .init(color: .black, location: 0.70),
-                    .init(color: .black.opacity(0.70), location: 0.82),
-                    .init(color: .black.opacity(0.32), location: 0.90),
-                    .init(color: .black.opacity(0.08), location: 0.96),
-                    .init(color: .clear, location: 1)
+                    .init(color: .black.opacity(centeredEdgeOpacity(0.70)), location: 0.82),
+                    .init(color: .black.opacity(centeredEdgeOpacity(0.32)), location: 0.90),
+                    .init(color: .black.opacity(centeredEdgeOpacity(0.08)), location: 0.96),
+                    .init(color: .black.opacity(centeredEdgeOpacity(0)), location: 1)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
+        } else if isFullscreenAspectFit {
+            Rectangle()
         } else if isLandscape {
             LinearGradient(
                 stops: [
@@ -324,6 +329,10 @@ struct BlendedVideoSurface<Content: View>: View {
         }
     }
 
+    private func centeredEdgeOpacity(_ edgeOpacity: Double) -> Double {
+        isFullscreenAspectFit ? 1 : edgeOpacity
+    }
+
     private func interpolateEdgeOpacity(_ collapsedValue: Double, _ centeredValue: Double) -> Double {
         collapsedValue + (centeredValue - collapsedValue) * Double(clampedEdgeBlendProgress)
     }
@@ -353,6 +362,7 @@ extension BlendedVideoSurface where Content == EmptyView {
         edgeBlendProgress: CGFloat = 0,
         topEdgeBlendProgress: CGFloat = 0,
         videoGravity: AVLayerVideoGravity = .resizeAspectFill,
+        isFullscreenAspectFit: Bool = false,
         layout: BlendedVideoSurfaceLayout = .topAnchored,
         colorSamplingPolicy: BlendedVideoColorSamplingPolicy = .sampleVideoFrame,
         seekRequest: VideoPlaybackSeekRequest? = nil,
@@ -373,6 +383,7 @@ extension BlendedVideoSurface where Content == EmptyView {
             edgeBlendProgress: edgeBlendProgress,
             topEdgeBlendProgress: topEdgeBlendProgress,
             videoGravity: videoGravity,
+            isFullscreenAspectFit: isFullscreenAspectFit,
             layout: layout,
             colorSamplingPolicy: colorSamplingPolicy,
             seekRequest: seekRequest,

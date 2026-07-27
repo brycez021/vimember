@@ -21,6 +21,9 @@ struct DiaryDetailView: View {
     @State private var pendingSeekProgress: Double?
     @State private var pendingSeekRequestID = 0
     @State private var isScrubbingPlayback = false
+    @State private var isLandscapePlaybackControlsVisible = false
+    @State private var landscapePlaybackControlsDismissID = 0
+    @State private var isPreparingLandscapeDismissal = false
     @State private var isDeleteConfirmationPresented = false
     @State private var isDeleting = false
     @State private var deleteError: String?
@@ -46,10 +49,16 @@ struct DiaryDetailView: View {
     }
 
     var body: some View {
-        GeometryReader { _ in
-            let screenSize = UIScreen.main.bounds.size
+        GeometryReader { geometry in
+            let screenSize = geometry.size
             let screenWidth = screenSize.width
             let screenHeight = screenSize.height
+            let isLandscapeFullscreen = currentDiary.isLandscapeVideo && screenWidth > screenHeight
+            let landscapeProgressWidth = screenWidth * (2 / 3)
+            let landscapeProgressY = screenHeight - max(geometry.safeAreaInsets.bottom, 12) - 18
+            let landscapeBackButtonSize: CGFloat = 44
+            let landscapeBackButtonX = geometry.safeAreaInsets.leading + 20 + landscapeBackButtonSize / 2
+            let landscapeBackButtonY = geometry.safeAreaInsets.top + 20 + landscapeBackButtonSize / 2
             let xScale = screenWidth / 420
             let yScale = screenHeight / 912
             let textLayout = DetailTextLayoutMetrics(
@@ -61,13 +70,12 @@ struct DiaryDetailView: View {
             )
             let videoSurfaceLayout: BlendedVideoSurfaceLayout = currentDiary.isLandscapeVideo ? .centeredLandscapeEdges : .topAnchored
             let detailVideoHeight = screenWidth / max(currentDiary.displayAspectRatio, 0.1)
-            let landscapeOpticalLift = 58 * yScale
-            let detailVideoYOffset = currentDiary.isLandscapeVideo ? max(0, (screenHeight - detailVideoHeight) / 2 - landscapeOpticalLift) : 0
+            let landscapeVideoLift: CGFloat = currentDiary.isLandscapeVideo ? 50 : 0
             let effectivePullDownProgress = currentDiary.isLandscapeVideo ? 0 : portraitPullDownProgress
             let portraitCenteredVideoYOffset = currentDiary.isLandscapeVideo ? 0 : max(0, (screenHeight - detailVideoHeight) / 2)
             let detailVideoPullDownMotionProgress = smoothStep(normalizedProgress(effectivePullDownProgress, from: 0.07, to: 1))
             let detailVideoPullDownYOffset = portraitCenteredVideoYOffset * detailVideoPullDownMotionProgress
-            let detailVideoMotionYOffset = -(textLayout.revealDistance * panelProgress / 3) + detailVideoPullDownYOffset
+            let detailVideoMotionYOffset = -(textLayout.revealDistance * panelProgress / 3) + detailVideoPullDownYOffset - landscapeVideoLift
             let detailVideoBlurRadius = 32 * yScale * smoothStep(panelProgress)
             let detailVideoEdgeBlendProgress = currentDiary.isLandscapeVideo ? 0 : smoothStep(effectivePullDownProgress)
             let detailVideoTopEdgeBlendProgress = currentDiary.isLandscapeVideo ? 0 : max(
@@ -88,15 +96,19 @@ struct DiaryDetailView: View {
                     isMuted: false,
                     width: screenWidth,
                     height: screenHeight,
-                    videoYOffset: detailVideoYOffset,
                     videoMotionYOffset: detailVideoMotionYOffset,
                     videoBlurRadius: detailVideoBlurRadius,
                     edgeBlendProgress: detailVideoEdgeBlendProgress,
                     topEdgeBlendProgress: detailVideoTopEdgeBlendProgress,
+                    videoGravity: currentDiary.isLandscapeVideo ? .resizeAspect : .resizeAspectFill,
+                    isFullscreenAspectFit: isLandscapeFullscreen,
                     layout: videoSurfaceLayout,
                     seekRequest: seekRequest,
                     onPlaybackProgressChange: { progress in
                         guard !isScrubbingPlayback else { return }
+                        guard !isLandscapeFullscreen || isLandscapePlaybackControlsVisible else {
+                            return
+                        }
                         playbackProgress = progress
                     },
                     onBottomColorChange: { color in
@@ -104,118 +116,198 @@ struct DiaryDetailView: View {
                     }
                 )
                 .ignoresSafeArea()
+                .zIndex(isLandscapeFullscreen ? 5 : 0)
 
-                BottomBlurPanelBackground(
-                    progress: panelProgress,
-                    pullDownProgress: effectivePullDownProgress,
-                    layout: textLayout,
-                    screenWidth: screenWidth,
-                    screenHeight: screenHeight,
-                    yScale: yScale,
-                    backgroundColor: sampledBottomColor
-                )
-                .zIndex(1)
-
-                DetailTextPanel(
-                    diary: currentDiary,
-                    progress: panelProgress,
-                    pullDownProgress: effectivePullDownProgress,
-                    layout: textLayout,
-                    screenWidth: screenWidth,
-                    screenHeight: screenHeight,
-                    xScale: xScale,
-                    yScale: yScale,
-                    scrollResetID: panelScrollResetID,
-                    playbackProgress: $playbackProgress,
-                    pendingSeekProgress: $pendingSeekProgress,
-                    pendingSeekRequestID: $pendingSeekRequestID,
-                    isScrubbingPlayback: $isScrubbingPlayback
-                )
-                .contentShape(Rectangle())
-                .simultaneousGesture(
-                    textPanelDragGesture(
-                        revealDistance: textLayout.revealDistance,
-                        pullDownDistance: textLayout.pullDownDistance,
-                        screenHeight: screenHeight
+                if !isLandscapeFullscreen {
+                    BottomBlurPanelBackground(
+                        progress: panelProgress,
+                        pullDownProgress: effectivePullDownProgress,
+                        layout: textLayout,
+                        screenWidth: screenWidth,
+                        screenHeight: screenHeight,
+                        yScale: yScale,
+                        backgroundColor: sampledBottomColor
                     )
-                )
-                .zIndex(1)
+                    .zIndex(1)
 
-                DetailTopControls(
-                    progress: panelProgress,
-                    screenWidth: screenWidth,
-                    xScale: xScale,
-                    yScale: yScale,
-                    isDeleting: isDeleting,
-                    isShareButtonHidden: isShareMenuMounted,
-                    onBack: {
-                        dismiss()
-                    },
-                    onDelete: {
-                        isDeleteConfirmationPresented = true
-                    },
-                    onShare: {
-                        showShareMenu()
-                    },
-                    onEdit: {
-                        isEditing = true
-                    }
-                )
-                .zIndex(2)
-
-                if isShareMenuMounted {
-                    DetailShareMenuOverlay(
-                        isExpanded: isShareMenuExpanded,
-                        progress: shareMenuProgress,
-                        contentOpacity: isShareMenuContentVisible ? 1 : 0,
-                        collapsedFrame: shareButtonFrame,
-                        fallbackCollapsedFrame: fallbackShareButtonFrame(
-                            screenWidth: screenWidth,
-                            xScale: xScale,
-                            yScale: yScale
-                        ),
-                        expandedFrame: shareMenuExpandedFrame(
-                            screenWidth: screenWidth,
-                            xScale: xScale,
-                            yScale: yScale
-                        ),
+                    DetailTextPanel(
+                        diary: currentDiary,
+                        progress: panelProgress,
+                        pullDownProgress: effectivePullDownProgress,
+                        layout: textLayout,
+                        screenWidth: screenWidth,
+                        screenHeight: screenHeight,
                         xScale: xScale,
                         yScale: yScale,
-                        canShareVideo: currentDiary.videoURL != nil,
-                        onDismiss: {
-                            closeShareMenu()
+                        scrollResetID: panelScrollResetID,
+                        playbackProgress: $playbackProgress,
+                        pendingSeekProgress: $pendingSeekProgress,
+                        pendingSeekRequestID: $pendingSeekRequestID,
+                        isScrubbingPlayback: $isScrubbingPlayback
+                    )
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(
+                        textPanelDragGesture(
+                            revealDistance: textLayout.revealDistance,
+                            pullDownDistance: textLayout.pullDownDistance,
+                            screenHeight: screenHeight
+                        )
+                    )
+                    .zIndex(1)
+
+                    DetailTopControls(
+                        progress: panelProgress,
+                        screenWidth: screenWidth,
+                        xScale: xScale,
+                        yScale: yScale,
+                        isDeleting: isDeleting,
+                        isShareButtonHidden: isShareMenuMounted,
+                        onBack: {
+                            dismiss()
                         },
-                        onShareVideo: {
-                            closeShareMenu()
-                            shareCurrentDiaryVideo()
+                        onDelete: {
+                            isDeleteConfirmationPresented = true
                         },
-                        onShareNote: {
-                            closeShareMenu()
-                            shareCurrentDiaryNote()
+                        onShare: {
+                            showShareMenu()
+                        },
+                        onEdit: {
+                            isEditing = true
                         }
                     )
-                    .frame(width: screenWidth, height: screenHeight, alignment: .topLeading)
-                    .zIndex(3)
+                    .zIndex(2)
+
+                    if isShareMenuMounted {
+                        DetailShareMenuOverlay(
+                            isExpanded: isShareMenuExpanded,
+                            progress: shareMenuProgress,
+                            contentOpacity: isShareMenuContentVisible ? 1 : 0,
+                            collapsedFrame: shareButtonFrame,
+                            fallbackCollapsedFrame: fallbackShareButtonFrame(
+                                screenWidth: screenWidth,
+                                xScale: xScale,
+                                yScale: yScale
+                            ),
+                            expandedFrame: shareMenuExpandedFrame(
+                                screenWidth: screenWidth,
+                                xScale: xScale,
+                                yScale: yScale
+                            ),
+                            xScale: xScale,
+                            yScale: yScale,
+                            canShareVideo: currentDiary.videoURL != nil,
+                            onDismiss: {
+                                closeShareMenu()
+                            },
+                            onShareVideo: {
+                                closeShareMenu()
+                                shareCurrentDiaryVideo()
+                            },
+                            onShareNote: {
+                                closeShareMenu()
+                                shareCurrentDiaryNote()
+                            }
+                        )
+                        .frame(width: screenWidth, height: screenHeight, alignment: .topLeading)
+                        .zIndex(3)
+                    }
+
+                    if let deleteError {
+                        Text(deleteError)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(.black.opacity(0.72), in: Capsule())
+                            .position(x: screenWidth / 2, y: screenHeight - 60)
+                            .zIndex(4)
+                    }
                 }
 
-                if let deleteError {
-                    Text(deleteError)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(.black.opacity(0.72), in: Capsule())
-                        .position(x: screenWidth / 2, y: screenHeight - 60)
-                        .zIndex(4)
+                if isLandscapeFullscreen {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            toggleLandscapePlaybackControls()
+                        }
+                        .zIndex(6)
+
+                    ZStack {
+                        LiquidGlassContainer(spacing: 0) {
+                            Circle()
+                                .fill(.clear)
+                                .frame(width: landscapeBackButtonSize, height: landscapeBackButtonSize)
+                                .vimemberInteractiveGlass(in: Circle())
+                        }
+                        .allowsHitTesting(false)
+
+                        DetailGlassIconButton(
+                            systemName: "chevron.left",
+                            size: landscapeBackButtonSize,
+                            action: {
+                                requestPortraitBeforeDismissal()
+                            }
+                        )
+                    }
+                    .frame(width: landscapeBackButtonSize, height: landscapeBackButtonSize)
+                    .position(x: landscapeBackButtonX, y: landscapeBackButtonY)
+                    .offset(y: isLandscapePlaybackControlsVisible ? 0 : -12)
+                    .opacity(isLandscapePlaybackControlsVisible ? 1 : 0)
+                    .allowsHitTesting(isLandscapePlaybackControlsVisible)
+                    .zIndex(8)
+
+                    DetailPlaybackDivider(
+                        progress: playbackProgress,
+                        width: landscapeProgressWidth,
+                        baseHeight: 1,
+                        progressHeight: 3,
+                        onScrubBegan: {
+                            landscapePlaybackControlsDismissID += 1
+                            isScrubbingPlayback = true
+                        },
+                        onScrubChanged: { progress in
+                            playbackProgress = progress
+                        },
+                        onScrubEnded: { progress in
+                            playbackProgress = progress
+                            pendingSeekRequestID += 1
+                            pendingSeekProgress = progress
+                            isScrubbingPlayback = false
+                            scheduleLandscapePlaybackControlsDismissal()
+                        }
+                    )
+                    .position(x: screenWidth / 2, y: landscapeProgressY)
+                    .offset(y: isLandscapePlaybackControlsVisible ? 0 : 18)
+                    .opacity(isLandscapePlaybackControlsVisible ? 1 : 0)
+                    .allowsHitTesting(isLandscapePlaybackControlsVisible)
+                    .zIndex(7)
                 }
             }
             .frame(width: screenWidth, height: screenHeight)
+            .persistentSystemOverlays(isLandscapeFullscreen ? .hidden : .automatic)
             .onPreferenceChange(DetailShareButtonFramePreferenceKey.self) { frame in
                 shareButtonFrame = frame
+            }
+            .onChange(of: isLandscapeFullscreen) { _, isFullscreen in
+                landscapePlaybackControlsDismissID += 1
+                isLandscapePlaybackControlsVisible = false
+
+                if isPreparingLandscapeDismissal && !isFullscreen {
+                    dismiss()
+                }
             }
             .ignoresSafeArea()
         }
         .ignoresSafeArea()
+        .background {
+            InterfaceOrientationScope(
+                allowsLandscape: currentDiary.isLandscapeVideo
+                    && !isEditing
+                    && sharePayload == nil
+                    && !isPreparingLandscapeDismissal
+            )
+            .frame(width: 0, height: 0)
+        }
         .alert("Delete this video diary?", isPresented: $isDeleteConfirmationPresented) {
             Button("Delete", role: .destructive) {
                 Task {
@@ -236,6 +328,54 @@ struct DiaryDetailView: View {
         }
         .sheet(item: $sharePayload) { payload in
             VideoDiaryShareSheet(activityItems: payload.activityItems)
+        }
+    }
+
+    @MainActor
+    private func requestPortraitBeforeDismissal() {
+        guard !isPreparingLandscapeDismissal else {
+            return
+        }
+
+        landscapePlaybackControlsDismissID += 1
+        withAnimation(.easeOut(duration: 0.18)) {
+            isLandscapePlaybackControlsVisible = false
+        }
+        isPreparingLandscapeDismissal = true
+    }
+
+    @MainActor
+    private func toggleLandscapePlaybackControls() {
+        landscapePlaybackControlsDismissID += 1
+
+        if isLandscapePlaybackControlsVisible {
+            withAnimation(.easeOut(duration: 0.18)) {
+                isLandscapePlaybackControlsVisible = false
+            }
+        } else {
+            withAnimation(.snappy(duration: 0.24)) {
+                isLandscapePlaybackControlsVisible = true
+            }
+            scheduleLandscapePlaybackControlsDismissal()
+        }
+    }
+
+    @MainActor
+    private func scheduleLandscapePlaybackControlsDismissal() {
+        landscapePlaybackControlsDismissID += 1
+        let dismissalID = landscapePlaybackControlsDismissID
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard dismissalID == landscapePlaybackControlsDismissID,
+                  isLandscapePlaybackControlsVisible,
+                  !isScrubbingPlayback else {
+                return
+            }
+
+            withAnimation(.easeOut(duration: 0.20)) {
+                isLandscapePlaybackControlsVisible = false
+            }
         }
     }
 
