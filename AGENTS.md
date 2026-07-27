@@ -5,9 +5,11 @@
 
 ## 1. 项目一句话
 
-vimember 是一个 iOS 视频日记 App：用户从系统相册导入视频，为视频配一段文字，然后在首页列表、画廊和详情页回看这些视频记忆。
+Vimory 是一个已经上架 App Store 的 iOS 视频日记 App：用户从系统相册导入视频，为视频配一段文字，然后在首页列表、画廊和详情页回看这些视频记忆。仓库名、工程名和本地路径仍保留 `vimember`，不要仅为了与上架名称一致而重命名。
 
 当前工程使用 Swift / SwiftUI，最低目标 iOS 17.0。iOS 26 及以上必须保持当前原生 Liquid Glass 体验；iOS 17-25 只做官方公开 API 的兼容 fallback，不得因此改动 iOS 26 视觉和交互。
+
+当前 App Store 线上基线为 `Vimory 0.1.0 (20)`。`main` 是与上线版本对应的代码副本，也是后续更新唯一允许使用的开发和发布基线。
 
 ## 2. 每轮必守边界
 
@@ -18,6 +20,7 @@ vimember 是一个 iOS 视频日记 App：用户从系统相册导入视频，�
 5. 正式 UI 以用户指定的 Figma 节点为准；未读取指定 Figma 前，不凭想象实现视觉细节。
 6. 不得照搬 `指导文件参考/` 里旧项目的产品语义、页面结构或代码路径；该目录只可作协作方式参考。
 7. 不要为了 GitHub 减重而删除本机测试视频、移除 Xcode 工程引用或改种子数据；如果只是不想推大文件，先用 Git 忽略/分支策略处理并向用户说明。
+8. App 已有真实用户数据。涉及 SwiftData 模型、沙盒视频目录、文件名、Bundle ID、签名或 Capability 的改动必须先说明升级影响；不得用删除数据库、重建容器或清空沙盒作为迁移方案。
 
 ## 3. 必读产品红线
 
@@ -64,17 +67,32 @@ https://www.figma.com/design/z9ewZ9itwDRhTMK94G08u1/vimember?node-id=0-1&t=xXw4C
 
 特别注意：当前首页/画廊/详情页/导入流程已有大量 Figma 对齐和用户微调。除非用户明确要求重做，不要以“清理代码”为名改变视觉、布局、动效或视频卡片样式。
 
-## 7. GitHub 与分支
+## 7. GitHub、文件集与分支
 
-1. `main` 是稳定分支；开发默认使用 `codex/` 前缀分支。
-2. 功能完成后通过 PR 合并到 `main`。
-3. 未经用户确认，不直接把未验证代码推到 `main`。
-4. 推送前检查 `git status`、staged diff 和大文件；不要把本机大测试视频误推到 GitHub。
+1. `main` 对应原 `/Users/zhangsiyuan/Documents/vimember-release` 文件集，是当前 App Store 上线副本，也是今后唯一的开发、PR 和发布基线。虽然当前检出目录名为 `vimember`，仍以分支内容和本条规则判断身份。
+2. `codex/perf-video-evidence` 对应原 `/Users/zhangsiyuan/Documents/vimember` 测试文件集，是带测试视频的历史性能/功能证据分支，不是发布分支。当前该分支含 22 个视频，约 512 MB，且只存在本机；不要从它开始新功能、不要合并到 `main`、不要把其中视频带入发布包，也不要未经用户允许删除。
+3. `main` 与 `codex/perf-video-evidence` 是两套没有共同 Git 祖先的历史，禁止对两者做普通 merge 或用“是否已合并”判断内容归属。需要参考历史实现时只读对照，并在 `main` 上重新做最小改动。
+4. 除上述两个分支外，现存本地/远程功能分支均视为废弃历史，不作为后续开发来源；`backup/main-before-release-snapshot-20260702` 也只视为发布整理前的历史备份。未经用户明确要求，不清理、不合并、不恢复这些分支。
+5. 新任务必须从最新 `main` 创建 `codex/` 前缀分支；功能完成并验证后通过 PR 合并回 `main`。
+6. 未经用户确认，不直接把未验证代码推到 `main`。推送前检查 `git status`、staged diff、版本号和大文件，确保测试视频不会进入 `main` 或 App 包。
 
-## 8. 建议阅读顺序
+## 8. 上架后更新红线
+
+详细流程见 [doc/APP_STORE_UPDATE_GUIDE.md](doc/APP_STORE_UPDATE_GUIDE.md)。每次更新至少遵守：
+
+1. 开发前确认 App Store 当前线上 Version / Build，并从最新 `main` 建分支。当前已知线上基线是 `0.1.0 (20)`。
+2. 更新必须沿用现有 App Store 记录、Bundle ID `com.brycez021.vimember`、签名与必要 Capability；任何身份或容器变更先向用户确认。
+3. 新版本必须完整验证“线上版本覆盖安装到候选版本”，重点检查 SwiftData 记录、专辑、文字和 `Application Support/ImportedVideos` 视频文件，不得只测全新安装。
+4. 修改 SwiftData 模型前先设计并验证迁移；不得靠删除 Store、卸载 App 或清空数据让代码通过。
+5. 上传前确保 Version 高于当前线上版本、Build 高于线上及所有已上传 Build。`project.yml`、`.xcodeproj` 和 Archive 的最终值必须一致。
+6. 权限、数据收集、第三方 SDK 或 Required Reason API 有变化时，同步核对 `Info.plist`、App Store Connect App Privacy、隐私政策和 `PrivacyInfo.xcprivacy`。
+7. 必须先完成 Release/Archive 检查和 TestFlight 升级回归，再提交 App Review；涉及迁移或高风险改动时优先手动发布或分阶段发布。
+
+## 9. 建议阅读顺序
 
 1. 每轮先读本文件。
 2. 产品行为不清楚：读 [doc/PRODUCT_REQUIREMENTS.md](doc/PRODUCT_REQUIREMENTS.md) 和 [doc/CURRENT_STATUS.md](doc/CURRENT_STATUS.md)。
 3. 视觉/Figma/UI 精修：读 [doc/FIGMA_UI_RULES.md](doc/FIGMA_UI_RULES.md)，并按用户指定节点读取 Figma。
 4. 架构/测试/性能：读 `doc/ARCH_REQUIREMENTS.md`、`doc/ARCH_TEST_REVIEW.md`、`doc/PERFORMANCE_BASELINE.md`。
-5. 项目背景和路线：按需读 `README.md`、`ROADMAP.md`、`Designsystem.md`、`contributing_ai.md`。
+5. 版本、分支、发布或上线后数据改动：读 [doc/APP_STORE_UPDATE_GUIDE.md](doc/APP_STORE_UPDATE_GUIDE.md)。
+6. 项目背景和路线：按需读 `README.md`、`ROADMAP.md`、`Designsystem.md`、`contributing_ai.md`。

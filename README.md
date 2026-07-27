@@ -1,8 +1,8 @@
-# vimember
+# Vimory（仓库名：vimember）
 
-vimember 是一个计划中的 iOS 视频日记 App。核心体验是：从系统相册导入视频，为视频添加文字，然后在首页列表、画廊和详情页中回看这些视频日记。
+Vimory 是一个已经上架 App Store 的 iOS 视频日记 App。核心体验是：从系统相册导入视频，为视频添加文字，然后在首页列表、画廊和详情页中回看这些视频日记。App Store 名称为 `Vimory`；仓库、Xcode 工程、Bundle ID 后缀和本地路径继续保留 `vimember`，不做目录重命名。
 
-当前仓库阶段：已完成指导文件整理、iOS 工程脚手架、首页原型、添加视频流程原型、详情页原型和画廊页原型。首页视频卡片、动态取色、横竖屏底色与渐进透明融合、详情页文字层、添加/编辑流程和画廊网格正在按 Figma 与用户截图校准。
+当前线上版本为 `0.1.0 (20)`。`main` 是由原 `vimember-release` 文件集形成的上线副本和唯一后续发布基线；当前代码/验证/分支详情见 [doc/CURRENT_STATUS.md](doc/CURRENT_STATUS.md)，上架后更新流程见 [doc/APP_STORE_UPDATE_GUIDE.md](doc/APP_STORE_UPDATE_GUIDE.md)。
 
 ## 产品目标
 
@@ -108,6 +108,8 @@ https://www.figma.com/design/z9ewZ9itwDRhTMK94G08u1/vimember?node-id=0-1&t=xXw4C
 - `claude.md`：给 AI 快速理解项目的全景文档。
 - `doc/ARCH_REQUIREMENTS.md`：架构约束。
 - `doc/ARCH_TEST_REVIEW.md`：架构与测试审查基线。
+- `doc/CURRENT_STATUS.md`：当前上线、实现、分支、验证和风险状态。
+- `doc/APP_STORE_UPDATE_GUIDE.md`：上架后开发、升级验证和 App Store 发布规则。
 - `指导文件参考/`：来自旧项目的参考指导文件，只作为文档结构参考。
 
 ## 当前待确认事项
@@ -116,13 +118,13 @@ https://www.figma.com/design/z9ewZ9itwDRhTMK94G08u1/vimember?node-id=0-1&t=xXw4C
 
 1. 摘要固定字数、行数和截断样式。
 2. 首页“最主要的一条视频”的判定方式。
-3. 画廊专辑创建流程、专辑数据模型和专辑详情页交互。
+3. 当前专辑持久化原型后续的正式数据关系、完整专辑详情页和迁移规则。
 4. 首页、画廊、导入和编辑页面后续新增状态的具体 Figma 节点。
-5. 视频是否静音自动播放，以及是否显示播放控制条。
+5. 是否增加显式播放或静音控制；当前首页/preview 默认静音、详情页有声循环播放。
 6. 是否需要浅色和深色模式。
 7. 账号、同步、备份、导出、搜索等后续能力是否进入未来版本。
 8. 首页日期显示方式切换规则。
 
 ## 技术状态
 
-已创建 iOS 工程和 SwiftUI 首页原型，当前可通过 `scripts/xcode-dev build` 构建。已接入首页演示视频、视频播放表面、底部取色采样、首页卡片文字摘要、悬浮搜索/添加/切换入口、切换设置卡片原型、相册视频选择、添加视频页、添加文字页、SwiftData 本地记录、App 沙盒视频复制、详情页、删除确认、再次编辑入口和画廊页原型。画廊的专辑创建与专辑详情流程仍待后续确认。
+当前 `main` 已包含上架文件集：SwiftData 日记/专辑记录、App 沙盒视频复制、相册选择与添加/编辑、首页单栏和三列模式、动态取色与视频播放控制、详情有声循环播放、分享/删除/编辑、系统 Context Menu、专辑创建/封面/筛选等轻量实现。发布副本不包含 sample/bundled 测试视频或启动 seed 逻辑。2026-07-10 使用本机 Xcode Beta 的 iOS 27.0 Simulator SDK 完成 Debug Build；Release Archive、真机、线上 `0.1.0 (20)` 覆盖安装和 TestFlight 更新验证尚未执行，详见 [doc/CURRENT_STATUS.md](doc/CURRENT_STATUS.md)。
