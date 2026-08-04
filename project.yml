@@ -26,8 +26,8 @@ targets:
     info:
       path: vimember/Info.plist
       properties:
-        CFBundleDisplayName: Vimory
-        CFBundleName: Vimory
+        CFBundleDisplayName: Vimo
+        CFBundleName: Vimo
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
